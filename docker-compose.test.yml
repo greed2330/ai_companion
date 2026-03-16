@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.test
+    environment:
+      - DB_PATH=:memory:
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://mock-ollama:11434
+      - OLLAMA_MODEL=qwen3:14b
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      pytest backend/tests/ -v --tb=short
+    volumes:
+      - .:/app
+    working_dir: /app

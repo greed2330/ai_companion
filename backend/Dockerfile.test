@@ -1,0 +1,11 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY backend/requirements.txt backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt \
+    && pip install --no-cache-dir pytest==8.3.4 pytest-asyncio==0.24.0 httpx==0.28.1
+
+COPY . .
+
+CMD ["pytest", "backend/tests/", "-v", "--tb=short"]
