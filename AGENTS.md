@@ -1177,7 +1177,7 @@ chore    설정, 패키지 등
 
 ### 📊 전체 Phase 진행 상태
 ```
-Phase 1 (대화 AI 코어)     : ⬜ 미시작
+Phase 1 (대화 AI 코어)     : 🔵 백엔드 완료 (PR 대기), 프론트 진행 중
 Phase 2 (기억)             : ⬜ 미시작
 Phase 3 (화면 상주)        : ⬜ 미시작
 Phase 4 (MCP/도구)         : ⬜ 미시작
@@ -1193,18 +1193,31 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: 없음
-현재 작업 중인 파일: 없음 (작업 시작 전)
-마지막 완료: —
+현재 작업 브랜치: claude/phase1-backend (커밋 완료, PR 대기 중)
+현재 작업 중인 파일: 없음 (소유권 해제)
+마지막 완료: Phase 1 백엔드 전체 구현 (2026-03-17)
 블로커: 없음
-다음 작업: Phase 1 백엔드 구현 대기 중
+다음 작업: Phase 2 (기억 파이프라인) — 대기 중
 ```
 
 **완료된 태스크:**
-- 없음 (작업 시작 전)
+- [x] FastAPI 서버 구조 (main.py, CORS, lifespan)
+- [x] POST /chat SSE 스트리밍 엔드포인트
+- [x] GET /history, GET /conversations
+- [x] POST /feedback, GET /mood
+- [x] SQLite DB 스키마 전체 6개 테이블 (AGENTS.md 6번)
+- [x] Ollama qwen3:14b 연동 + 시스템 프롬프트 + 무드 엔진
+- [x] Celery + Redis 뼈대 (celery_app.py)
+- [x] docker-compose.test.yml + backend/Dockerfile.test
+- [x] pytest 테스트: test_chat.py (7개), test_db.py (4개), Ollama mock 처리
+- [x] requirements.txt, .env.example
 
 **Codex에게 전달할 브리핑:**
-- 없음
+- 백엔드 API 로컬 실행 확인됨 / 포트 8000
+- AGENTS.md 9-1 계약서 그대로 구현됨 — 프론트에서 그대로 호출 가능
+- SSE 스트림 형식: `{"type":"token","content":"..."}` → `{"type":"done","message_id":"...","conversation_id":"...","mood":"IDLE"}` → `[DONE]`
+- 에러 시: `{"type":"error","code":"LLM_UNAVAILABLE","message":"..."}`
+- /feedback, /mood는 memory.py 라우터에 있음 (파일명 주의)
 
 ---
 
