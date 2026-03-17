@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from backend.models.schema import DB_PATH
 from backend.services.llm import stream_chat
 from backend.services.memory import search_memory, update_confidence
-from backend.services.mood import get_mood
+from backend.services.mood import detect_mood_from_text, get_mood, set_mood
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +176,12 @@ async def chat(req: ChatRequest) -> StreamingResponse:
                 return
 
             elapsed_ms = int(time.time() * 1000) - start_ms
-            current_mood = get_mood()["mood"]
+
+            # 응답 내용 기반으로 무드 자동 감지 및 업데이트
+            full_text = "".join(full_response)
+            detected_mood = detect_mood_from_text(full_text)
+            set_mood(detected_mood)
+            current_mood = detected_mood
 
             await _save_message(
                 db,
