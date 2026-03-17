@@ -92,6 +92,31 @@ docker-compose -f docker-compose.test.yml run frontend npm test
 ```
 All tests must pass before opening a PR. No exceptions.
 
+### Known Pitfalls
+
+**Mock 모듈 import 방식 주의 (Jest)**
+`import { foo } from './module'` 형태로 가져온 함수는 원본 모듈을 mock해도 교체되지 않음.
+Jest에서는 `jest.mock('./module')` 을 파일 최상단에 선언하거나,
+`jest.spyOn(module, 'foo')` 패턴으로 호출 모듈 기준 패치를 써야 함.
+```js
+// ❌ 틀림 — 이미 복사된 참조는 바뀌지 않음
+import { fetchChat } from '../api/chat'
+jest.mock('../api/chat') // 너무 늦음, 이미 import됨
+
+// ✅ 맞음 — 파일 최상단에 선언 (Jest가 호이스팅함)
+jest.mock('../api/chat')
+import { fetchChat } from '../api/chat'
+```
+
+**SSE fetch 테스트 시 ReadableStream mock 필요**
+`fetch` + SSE 스트림은 jsdom 환경에서 기본 지원 안 됨.
+`ReadableStream`, `TextDecoder`를 jest setup에서 global에 추가하거나,
+SSE 파싱 로직을 별도 유틸 함수로 분리해서 단위 테스트로 커버할 것.
+
+**백엔드와의 협업 포인트**
+- Claude Code의 AGENTS.md section 10 브리핑을 항상 확인하고 시작할 것
+- API 스펙이 AGENTS.md 9-1과 다르게 동작하면 → 직접 수정하지 말고 section 10에 기록
+
 ### What to test
 | Target | Test for |
 |--------|----------|
