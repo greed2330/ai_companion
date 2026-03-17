@@ -15,7 +15,6 @@ def use_tmp_db(tmp_path, monkeypatch):
     """각 테스트마다 임시 SQLite DB를 사용한다."""
     db_file = str(tmp_path / "test_hana.db")
     monkeypatch.setenv("DB_PATH", db_file)
-    # schema 모듈의 DB_PATH도 갱신
     import backend.models.schema as schema_mod
     monkeypatch.setattr(schema_mod, "DB_PATH", db_file)
     import backend.routers.chat as chat_mod
@@ -24,8 +23,16 @@ def use_tmp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(mem_mod, "DB_PATH", db_file)
 
 
+@pytest.fixture(autouse=True)
+def mock_memory_service(monkeypatch):
+    """search_memory와 update_confidence를 no-op mock으로 대체한다."""
+    import backend.services.memory as svc_mod
+    monkeypatch.setattr(svc_mod, "search_memory", AsyncMock(return_value=[]))
+    monkeypatch.setattr(svc_mod, "update_confidence", AsyncMock())
+
+
 @pytest_asyncio.fixture
-async def client(use_tmp_db):
+async def client(use_tmp_db, mock_memory_service):
     from backend.main import app
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -53,7 +60,7 @@ def parse_sse(text: str) -> list[dict]:
 async def test_chat_happy_path(client):
     """정상 메시지 → SSE 스트림에 token 이벤트와 done 이벤트가 포함된다."""
 
-    async def fake_stream(messages):
+    async def fake_stream(messages, memory_context=None):
         for tok in ["안", "녕", "!"]:
             yield tok
 
@@ -83,7 +90,7 @@ async def test_chat_happy_path(client):
 async def test_chat_reuses_conversation_id(client):
     """conversation_id를 지정하면 같은 세션으로 이어진다."""
 
-    async def fake_stream(messages):
+    async def fake_stream(messages, memory_context=None):
         yield "응"
 
     conv_id = "test-conv-0001"
@@ -118,7 +125,7 @@ async def test_chat_empty_message_returns_error(client):
 async def test_chat_llm_unavailable(client):
     """Ollama 연결 실패 시 SSE error 이벤트를 반환한다."""
 
-    async def fail_stream(messages):
+    async def fail_stream(messages, memory_context=None):
         raise RuntimeError("Ollama 연결 실패")
         yield  # AsyncGenerator 타입 만족
 
@@ -140,7 +147,7 @@ async def test_chat_llm_unavailable(client):
 async def test_history_returns_messages(client):
     """대화 후 /history로 메시지를 조회할 수 있다."""
 
-    async def fake_stream(messages):
+    async def fake_stream(messages, memory_context=None):
         yield "응답이야"
 
     with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
@@ -166,7 +173,7 @@ async def test_history_returns_messages(client):
 async def test_conversations_list(client):
     """대화 후 /conversations에서 세션이 조회된다."""
 
-    async def fake_stream(messages):
+    async def fake_stream(messages, memory_context=None):
         yield "응"
 
     with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
@@ -186,7 +193,7 @@ async def test_conversations_list(client):
 async def test_feedback_success(client):
     """정상 피드백 요청은 success: true를 반환한다."""
 
-    async def fake_stream(messages):
+    async def fake_stream(messages, memory_context=None):
         yield "응"
 
     with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):

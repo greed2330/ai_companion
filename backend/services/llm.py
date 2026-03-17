@@ -4,12 +4,15 @@ Ollama SSE 스트리밍 연동.
 """
 
 import json
+import logging
 import os
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 import httpx
 
 from backend.services.mood import MOOD_INSTRUCTIONS, get_mood
+
+logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3:14b")
@@ -34,21 +37,25 @@ _BASE_SYSTEM_PROMPT = """너는 하나야. 오너의 PC 화면에 살고 있는 
 """
 
 
-def build_system_prompt() -> str:
-    """현재 무드를 반영한 시스템 프롬프트를 생성한다."""
+def build_system_prompt(memory_context: Optional[str] = None) -> str:
+    """현재 무드와 장기기억을 반영한 시스템 프롬프트를 생성한다."""
     mood = get_mood()["mood"]
     mood_instruction = MOOD_INSTRUCTIONS.get(mood, MOOD_INSTRUCTIONS["IDLE"])
-    return _BASE_SYSTEM_PROMPT.format(mood_instruction=mood_instruction)
+    prompt = _BASE_SYSTEM_PROMPT.format(mood_instruction=mood_instruction)
+    if memory_context:
+        prompt += f"\n\n## What I know about you\n{memory_context}"
+    return prompt
 
 
 async def stream_chat(
     messages: list[dict],
+    memory_context: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """
     Ollama /api/chat 엔드포인트로 SSE 스트리밍 요청을 보내고
     토큰 단위로 content 문자열을 yield한다.
     """
-    system_prompt = build_system_prompt()
+    system_prompt = build_system_prompt(memory_context)
     payload = {
         "model": OLLAMA_MODEL,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
@@ -56,6 +63,7 @@ async def stream_chat(
         "keep_alive": OLLAMA_KEEP_ALIVE,
     }
 
+    logger.info(f"Ollama connection attempt: model={OLLAMA_MODEL}")
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
@@ -63,9 +71,11 @@ async def stream_chat(
             json=payload,
         ) as response:
             if response.status_code != 200:
+                logger.error(f"Ollama connection failure: status={response.status_code}")
                 raise RuntimeError(
                     f"Ollama 응답 오류: {response.status_code}"
                 )
+            logger.info("Ollama connection success")
             async for line in response.aiter_lines():
                 if not line:
                     continue

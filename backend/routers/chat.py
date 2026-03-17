@@ -5,7 +5,9 @@ GET /history — 대화 메시지 목록
 GET /conversations — 세션 목록
 """
 
+import asyncio
 import json
+import logging
 import time
 import uuid
 from datetime import datetime, timezone
@@ -18,9 +20,15 @@ from pydantic import BaseModel
 
 from backend.models.schema import DB_PATH
 from backend.services.llm import stream_chat
+from backend.services.memory import search_memory, update_confidence
 from backend.services.mood import get_mood
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# 하나 시스템에서 사용자 식별자 (현재는 단일 사용자)
+_OWNER_USER_ID = "owner"
 
 
 class ChatRequest(BaseModel):
@@ -56,6 +64,27 @@ async def _load_recent_messages(
     return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
 
 
+async def _get_last_assistant_time(
+    db: aiosqlite.Connection, conversation_id: str
+) -> Optional[datetime]:
+    """마지막 assistant 메시지의 created_at을 반환한다."""
+    async with db.execute(
+        "SELECT created_at FROM messages "
+        "WHERE conversation_id = ? AND role = 'assistant' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (conversation_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if not row:
+        return None
+    ts = row[0]
+    # SQLite는 timezone 정보가 없을 수 있으므로 UTC로 파싱
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+
+
 async def _save_message(
     db: aiosqlite.Connection,
     message_id: str,
@@ -64,12 +93,14 @@ async def _save_message(
     content: str,
     mood: Optional[str] = None,
     response_time_ms: Optional[int] = None,
+    owner_response_delay_ms: Optional[int] = None,
 ) -> None:
     await db.execute(
         """
         INSERT INTO messages
-            (id, conversation_id, role, content, mood_at_response, response_time_ms, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (id, conversation_id, role, content, mood_at_response,
+             response_time_ms, owner_response_delay_ms, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             message_id,
@@ -78,6 +109,7 @@ async def _save_message(
             content,
             mood,
             response_time_ms,
+            owner_response_delay_ms,
             datetime.now(timezone.utc).isoformat(),
         ),
     )
@@ -94,26 +126,52 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         })
 
     conversation_id = req.conversation_id or str(uuid.uuid4())
+    request_time = datetime.now(timezone.utc)
+    logger.info(f"/chat request received: conversation_id={conversation_id}")
 
     async def event_stream():
         async with aiosqlite.connect(DB_PATH) as db:
             await _ensure_conversation(db, conversation_id)
 
-            user_msg_id = str(uuid.uuid4())
-            await _save_message(db, user_msg_id, conversation_id, "user", req.message)
+            # 오너 응답 딜레이 계산 (마지막 assistant 메시지 기준)
+            last_time = await _get_last_assistant_time(db, conversation_id)
+            delay_ms = (
+                int((request_time - last_time).total_seconds() * 1000)
+                if last_time
+                else None
+            )
 
-            history = await _load_recent_messages(db, conversation_id)
-            # 방금 저장한 user 메시지는 이미 history에 포함됨
+            user_msg_id = str(uuid.uuid4())
+            await _save_message(
+                db, user_msg_id, conversation_id, "user", req.message,
+                owner_response_delay_ms=delay_ms,
+            )
+
+            # 대화 히스토리 로드와 메모리 검색을 병렬 수행
+            history, memories = await asyncio.gather(
+                _load_recent_messages(db, conversation_id),
+                search_memory(_OWNER_USER_ID, req.message),
+            )
+
+            # 참조된 기억의 confidence 업데이트
+            for mem in memories:
+                await update_confidence(mem["id"], delta=0.1)
+
+            # 메모리를 시스템 프롬프트에 주입할 형식으로 조합
+            memory_context: Optional[str] = None
+            if memories:
+                memory_context = "\n".join(f"- {m['fact']}" for m in memories)
 
             assistant_msg_id = str(uuid.uuid4())
             full_response = []
             start_ms = int(time.time() * 1000)
 
             try:
-                async for token in stream_chat(history):
+                async for token in stream_chat(history, memory_context=memory_context):
                     full_response.append(token)
                     yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
             except Exception as exc:
+                logger.error(f"/chat LLM error: conversation_id={conversation_id} error={exc}")
                 yield f"data: {json.dumps({'type': 'error', 'code': 'LLM_UNAVAILABLE', 'message': str(exc)}, ensure_ascii=False)}\n\n"
                 return
 
@@ -138,6 +196,7 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
+            logger.info(f"/chat response complete: conversation_id={conversation_id} elapsed_ms={elapsed_ms}")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
