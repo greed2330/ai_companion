@@ -1071,6 +1071,56 @@ GET /conversations?limit=20
 
 ---
 
+**GET /mood/stream** — 무드 변경 실시간 SSE 푸시
+
+연결 유지. 무드 바뀔 때마다 push.
+초기 연결 시 현재 무드 즉시 전송. 30초마다 heartbeat comment 전송.
+
+이벤트 형식:
+```
+data: {"type": "mood_change", "mood": "MOOD_NAME", "updated_at": "ISO8601"}
+data: {"type": "model_change", "model_id": "nanoka", "updated_at": "ISO8601"}
+```
+
+heartbeat:
+```
+: heartbeat
+```
+
+---
+
+**GET /settings/models** — 캐릭터 모델 목록 조회
+
+응답:
+```json
+{
+  "models": [
+    {
+      "id": "nanoka",
+      "path": "assets/character/nanoka/nanoka.model3.json",
+      "name": "Nanoka"
+    }
+  ],
+  "current": "nanoka"
+}
+```
+
+---
+
+**POST /settings/models/select** — 캐릭터 모델 변경
+
+요청:
+```json
+{"model_id": "nanoka"}
+```
+
+응답:
+```json
+{"success": true, "current": "nanoka"}
+```
+
+---
+
 **POST /voice/stt** — 음성 → 텍스트 (Phase 4.5)
 
 요청: `multipart/form-data`
@@ -1182,8 +1232,8 @@ chore    설정, 패키지 등
 ### 📊 전체 Phase 진행 상태
 ```
 Phase 1 (대화 AI 코어)     : ✅ 백엔드 완료, 프론트 진행 중
-Phase 2 (기억)             : 🔵 백엔드 완료 (PR 대기)
-Phase 3 (화면 상주)        : ⬜ 미시작
+Phase 2 (기억)             : ✅ 백엔드 완료 (merged)
+Phase 3 (화면 상주)        : 🔵 백엔드 진행 중 (mood stream + settings)
 Phase 4 (MCP/도구)         : ⬜ 미시작
 Phase 4.5 (음성)           : ⬜ 미시작
 Phase 5 (파인튜닝)         : ⬜ 미시작
@@ -1197,11 +1247,11 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase2-memory (커밋 완료, PR 대기 중)
+현재 작업 브랜치: claude/phase3-mood-stream (커밋 완료, PR 대기 중)
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 2 백엔드 구현 (2026-03-17)
+마지막 완료: Phase 3 백엔드 — mood stream + 무드 엔진 + 모델 설정 API (2026-03-18)
 블로커: 없음
-다음 작업: Phase 3 또는 Phase 2 RAG — 대기 중
+다음 작업: Phase 3 Codex 프론트 완료 후 dev 통합 검증 대기
 ```
 
 **완료된 태스크 (Phase 1):**
@@ -1230,10 +1280,24 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 - [x] requirements.txt: mem0ai, chromadb 추가
 - [x] pytest.ini: pythonpath 추가 (Docker 호환)
 
+**완료된 태스크 (Phase 3 백엔드):**
+- [x] .gitignore: assets/character/ 추가 (Live2D 저작권 보호)
+- [x] services/mood.py: MOOD_TRIGGERS, asyncio.Queue 구독자 패턴, detect_mood_from_text, push_event
+- [x] routers/mood.py: GET /mood/stream (SSE, 초기 무드 전송, 30초 heartbeat)
+- [x] routers/settings.py: GET /settings/models, POST /settings/models/select
+- [x] routers/chat.py: 응답 후 detect_mood_from_text + set_mood 자동 호출
+- [x] main.py: mood_router, settings_router 등록
+- [x] AGENTS.md 9-1 API 계약서 신규 엔드포인트 추가
+- [x] backend/tests/test_mood_stream.py: 14개 테스트 — 38/38 전부 통과
+
 **Codex에게 전달할 브리핑:**
-- Phase 1 API 계약서 완전히 유지됨 — 프론트 호출 방식 변경 없음
-- Phase 2 신규 엔드포인트: GET /memory/facts?query=&limit=5, DELETE /memory/facts/{id}
-- /feedback, /mood는 여전히 memory.py 라우터에 있음
+- Phase 1/2 API 계약서 완전히 유지됨 — 기존 프론트 호출 방식 변경 없음
+- Phase 3 신규 엔드포인트 (AGENTS.md 9-1 참고):
+  - GET /mood/stream — SSE. 연결 즉시 현재 무드 push, 무드 바뀔 때마다 push, 30초 heartbeat
+  - GET /settings/models — assets/character/ 스캔 결과 반환
+  - POST /settings/models/select — 모델 선택 + /mood/stream으로 model_change 이벤트 push
+- /mood (GET) 기존 엔드포인트 유지됨 — 초기 로드용으로 그대로 사용 가능
+- mood stream 이벤트 타입: "mood_change" (무드 변경), "model_change" (모델 변경)
 - mem0 실제 동작에는 ollama에 nomic-embed-text 모델 필요: ollama pull nomic-embed-text
 
 ---

@@ -13,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.models.schema import init_db
 from backend.routers.chat import router as chat_router
 from backend.routers.memory import router as memory_router
+from backend.routers.mood import router as mood_router
+from backend.routers.settings import router as settings_router
 
 
 def _setup_logging() -> None:
@@ -53,3 +55,5 @@ app.add_middleware(
 
 app.include_router(chat_router)
 app.include_router(memory_router)
+app.include_router(mood_router)
+app.include_router(settings_router)
