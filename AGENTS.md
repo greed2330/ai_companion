@@ -1101,6 +1101,9 @@ audio: <wav 파일>
 응답: `audio/wav` 바이너리 스트림
 
 ### 9-2. 브랜치 전략
+> **main PR 자격 규칙:** `dev`에서 통합과 검증이 끝나고, 에러가 없다는 확인이 완료되어야만 `main` 브랜치 PR을 올릴 수 있습니다.
+> `main`은 최신이라고 해서 바로 기준으로 삼는 브랜치가 아니라, `dev` 검증 통과 후에만 올라가는 최종 승격 브랜치입니다.
+
 ```
 main          ← 검증된 코드만. 직접 푸시 금지.
 dev           ← 통합 브랜치. 여기서 테스트 후 main PR.
@@ -1132,6 +1135,7 @@ codex/*       ← Codex 작업 브랜치.
 ### 9-6. 작업 후 체크리스트
 > 상세 체크리스트는 CLAUDE.md / CODEX.md의 Pre-PR Checklist를 따를 것.
 > 아래는 AGENTS.md 업데이트 기준.
+> `main` PR은 `dev` 통합 검증이 완료되고 에러가 없다는 확인 전에는 금지.
 ```
 □ 테스트 통과 확인 (pytest / npm test)
 □ 이 문서 [10. 현재 상태] 업데이트
@@ -1238,18 +1242,29 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 > 이 섹션은 Codex만 수정합니다.
 
 ```
-현재 작업 브랜치: 없음
-현재 작업 중인 파일: 없음 (작업 시작 전)
-마지막 완료: —
-블로커: 없음
-다음 작업: Phase 1 프론트엔드 구현 대기 중
+현재 작업 브랜치: codex/phase1-frontend
+현재 작업 중인 파일: 없음 (소유권 해제)
+마지막 완료: Phase 1 프론트엔드 채팅/SSE 구현 + 테스트 통과, 브랜치 승격 규칙 문서 명시
+블로커: docker-compose.test.yml 파싱 오류로 Docker 테스트 미실행
+다음 작업: origin/dev 기준으로 브랜치 재정렬 후 dev 검증 완료 시 PR
 ```
 
 **완료된 태스크:**
-- 없음 (작업 시작 전)
+- [x] frontend 기본 구조 구성 (electron/, src/, tests/, styles/)
+- [x] Electron main 프로세스 기본 창 설정 + 개발 시 localhost:3000 로드
+- [x] ChatWindow 구현 (입력/전송/히스토리 렌더)
+- [x] POST /chat 호출 + SSE 스트리밍 파싱
+- [x] SSE 이벤트 처리: token/done/error/[DONE]
+- [x] VITE_API_BASE_URL 환경변수 연결 (.env 기본값 포함)
+- [x] App 라우팅 + Alt+H 채팅 오버레이 토글
+- [x] Jest/RTL 테스트 추가 (ChatWindow, CharacterOverlay, Hotkey)
+- [x] 프론트 로컬 실행 확인됨 / 백엔드 연동 확인
+- [x] 로컬 테스트 통과: `npm test` (frontend)
 
 **Claude Code에게 전달할 브리핑:**
-- 없음
+- Docker 테스트 명령(`docker-compose -f docker-compose.test.yml run frontend npm test`)은 현재 compose 파싱 오류로 실패:
+  - `services.backend.environment.[0]: unexpected type map[string]interface {}`
+  - 프론트 자체 Jest 테스트는 로컬에서 통과 완료
 
 ---
 
