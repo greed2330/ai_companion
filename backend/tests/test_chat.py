@@ -34,6 +34,9 @@ def mock_memory_service(monkeypatch):
 @pytest_asyncio.fixture
 async def client(use_tmp_db, mock_memory_service):
     from backend.main import app
+    from backend.models.schema import init_db
+    # ASGITransport은 lifespan을 트리거하지 않으므로 직접 DB 초기화
+    await init_db()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:

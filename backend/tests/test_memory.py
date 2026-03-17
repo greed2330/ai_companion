@@ -46,6 +46,9 @@ def mock_mem0(monkeypatch):
 @pytest_asyncio.fixture
 async def client(use_tmp_db, mock_mem0):
     from backend.main import app
+    from backend.models.schema import init_db
+    # ASGITransport은 lifespan을 트리거하지 않으므로 직접 DB 초기화
+    await init_db()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
@@ -217,8 +220,8 @@ async def test_chat_injects_memory(client, mock_mem0):
         yield "응답"
 
     # search_memory가 사실을 반환하도록 설정
-    with patch.object(svc_mod, "search_memory", new_callable=AsyncMock) as mock_search, \
-         patch.object(svc_mod, "update_confidence", new_callable=AsyncMock), \
+    with patch("backend.routers.chat.search_memory", new_callable=AsyncMock) as mock_search, \
+         patch("backend.routers.chat.update_confidence", new_callable=AsyncMock), \
          patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
         mock_search.return_value = [
             {"id": "f1", "fact": "오너는 Python 개발자야", "confidence": 0.9}
@@ -247,8 +250,8 @@ async def test_chat_no_memory_context_when_empty(client):
         injected_context = memory_context
         yield "응답"
 
-    with patch.object(svc_mod, "search_memory", new_callable=AsyncMock) as mock_search, \
-         patch.object(svc_mod, "update_confidence", new_callable=AsyncMock), \
+    with patch("backend.routers.chat.search_memory", new_callable=AsyncMock) as mock_search, \
+         patch("backend.routers.chat.update_confidence", new_callable=AsyncMock), \
          patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
         mock_search.return_value = []
 
@@ -271,12 +274,14 @@ async def test_owner_response_delay_saved(use_tmp_db):
     async def fake_stream(messages, memory_context=None):
         yield "응답"
 
-    with patch.object(svc_mod, "search_memory", new_callable=AsyncMock) as mock_search, \
-         patch.object(svc_mod, "update_confidence", new_callable=AsyncMock), \
+    with patch("backend.routers.chat.search_memory", new_callable=AsyncMock) as mock_search, \
+         patch("backend.routers.chat.update_confidence", new_callable=AsyncMock), \
          patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
         mock_search.return_value = []
 
         from backend.main import app
+        from backend.models.schema import init_db
+        await init_db()
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as ac:
