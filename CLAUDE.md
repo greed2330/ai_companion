@@ -182,6 +182,8 @@ Never assume Codex knows something unless it's written there.
 Update section 10 after every meaningful unit of work — not just at PR time.
 
 ### Git Strategy
+`main` PR eligibility rule: a branch earns the right to open a PR to `main` only after integration on `dev` is complete and `dev` verification finishes with no errors.
+
 ```
 main     ← never push directly. PR from dev only.
 dev      ← integration branch. both agents merge here.
@@ -211,6 +213,8 @@ claude/* ← your branches only. never touch codex/*.
 - Open a PR without passing tests
 
 ### Pre-PR Checklist
+`main` PR gate: do not consider or open any `main` PR until `dev` integration verification is complete and confirmed error-free.
+
 ```
 □ Self-review complete (see Session-End Self-Review above)
 □ All tests pass: pytest backend/tests/ -v
