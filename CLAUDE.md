@@ -66,6 +66,22 @@
 - All env vars via `.env` + `python-dotenv`. No hardcoding ever.
 - Import order: stdlib → third-party → local
 
+### Logging
+- Use Python standard logging library only. No `print()` anywhere.
+- Log file: `logs/hana.log` (auto-create `logs/` dir on startup)
+- Add `logs/` to `.gitignore`
+- Log format: `[%(asctime)s] %(levelname)s %(name)s: %(message)s`
+- Log levels:
+  - INFO    : service start/stop, successful connections, API requests/responses, Celery task start/complete
+  - WARNING : recoverable failures, retryable errors
+  - ERROR   : connection failures, unhandled exceptions, task failures
+- Required log points:
+  - Ollama connection attempt / success / failure
+  - Redis connection attempt / success / failure
+  - `/chat` request received / response complete (include conversation_id)
+  - Celery task start / complete / failure (include task name)
+  - Memory extract / save / search (include fact count)
+
 ### API Responses
 - Success: HTTP 200, `{"data": ...}`
 - Error: AGENTS.md 9-1 error format exactly
