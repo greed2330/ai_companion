@@ -103,6 +103,16 @@
 - **Ollama는 반드시 mock으로 대체** — 테스트에서 실제 LLM 호출 금지
 - **모든 테스트는 Docker 컨테이너 안에서 실행** — 로컬 환경 의존성 오염 방지
 
+### Known Pitfalls
+- **ASGITransport은 FastAPI lifespan을 실행하지 않는다.**
+  `AsyncClient(transport=ASGITransport(app=app))`는 `lifespan`(init_db 등)을 트리거하지 않음.
+  → `client` fixture에서 `await init_db()`를 직접 호출할 것.
+
+- **`from module import func` 후 mock 패치는 호출 모듈 기준으로.**
+  `chat.py`가 `from services.memory import search_memory`로 임포트했다면,
+  `patch("services.memory.search_memory")`는 무효. `patch("routers.chat.search_memory")`로 패치.
+  규칙: `patch("함수를_사용하는_모듈.함수명")`
+
 ### Running tests (Docker)
 ```bash
 # 테스트 환경 실행
