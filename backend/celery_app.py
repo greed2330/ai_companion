@@ -1,11 +1,11 @@
 """
-Celery 기본 설정.
-Phase 2에서 태스크를 추가한다. 지금은 뼈대만.
+Celery 설정 및 beat 스케줄.
 """
 
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
@@ -28,4 +28,11 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="Asia/Seoul",
     enable_utc=True,
+    beat_schedule={
+        # 매일 자정 망각 곡선 decay 실행
+        "daily-confidence-decay": {
+            "task": "decay_tasks.run_confidence_decay",
+            "schedule": crontab(hour=0, minute=0),
+        },
+    },
 )
