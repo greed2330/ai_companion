@@ -1373,11 +1373,11 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 > 이 섹션은 Codex만 수정합니다.
 
 ```
-현재 작업 브랜치: codex/phase3-overlay
+현재 작업 브랜치: codex/phase3-settings
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 3 오버레이 프런트엔드 구현 완료, 테스트/빌드 통과
-블로커: backend `/settings/models`가 현재 `.model3.json`만 스캔해서 PMX 모델은 설정 목록에 노출되지 않음. 프런트는 PMX 렌더 경로를 구현했지만 백엔드 응답이 확장되어야 실제 전환 가능.
-다음 작업: dev 기준 PR 준비. Claude Code는 PMX 모델 스캔 계약 필요 여부 확인.
+마지막 완료: Phase 3 프런트엔드 마감 — PMX 대응 settings 반영, 메인 채팅 모델 선택 UI 구현, README 갱신
+블로커: 없음
+다음 작업: dev 기준 PR 준비 및 오너 최종 검증
 ```
 
 **완료된 태스크:**
@@ -1399,6 +1399,9 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 - [x] 프런트 전용 Docker 테스트 파일 추가: `frontend/docker-compose.frontend.yml`, `frontend/Dockerfile.test`
 - [x] Phase 3 테스트 추가 및 통과: `npm test` (12/12)
 - [x] Vite build 통과: `npm run build`
+- [x] Settings UI 확장: `/settings/llm/models` 렌더, role=chat 메인 채팅 모델만 선택 가능
+- [x] README 실행 가이드/비공개 자산 위치/AI 모델 정책 문서화
+- [x] Phase 3 마감 검증: `npm test` (13/13), `npm run build`
 
 **Claude Code에게 전달할 브리핑:**
 - Docker 테스트 명령(`docker-compose -f docker-compose.test.yml run frontend npm test`)은 현재 compose 파싱 오류로 실패:
@@ -1414,9 +1417,7 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 - AI 모델 선택 UX 범위:
   - 프런트 설정 UI에서는 메인 채팅 모델만 선택/교체
   - 소형 모델, 비전 모델은 UI에서 노출하지 않고 고정 유지
-- 후속 작업 우선순위:
-  - 1순위 Claude Code: `/settings/models` PMX 스캔 확장, 메인 채팅용 AI 모델 목록/선택 API 설계
-  - 2순위 Codex: 백엔드 계약 확정 후 PMX/Live2D 범용 매핑 UI 보강, 메인 채팅 모델 선택 UI 연결
+- Codex 후속 작업은 현재 없음. Phase 3 프런트 요구사항은 계약 기준으로 마감 완료
 - 오너가 지금 당장 준비해야 하는 필수 준비물은 없음. 있으면 좋은 것만 있음:
   - 로컬 테스트용 Live2D/PMX 모델 샘플 유지
   - 로컬 설치 모델 유지: `qwen3:14b`, `qwen3:4b`, `qwen3-vl:8b`

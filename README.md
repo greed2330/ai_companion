@@ -75,10 +75,14 @@ At minimum, the current codebase expects these:
 
 ```bash
 ollama pull qwen3:14b
+ollama pull qwen3:4b
+ollama pull qwen3-vl:8b
 ollama pull nomic-embed-text
 ```
 
-`qwen3:14b` is used for chat.  
+`qwen3:14b` is the default main chat model.  
+`qwen3:4b` is used for smaller worker-style tasks.  
+`qwen3-vl:8b` is reserved for vision.  
 `nomic-embed-text` is used by the current memory pipeline.
 
 If Ollama is not already running, start it first.
@@ -103,6 +107,8 @@ The backend currently uses sensible local defaults for:
 
 - `OLLAMA_BASE_URL=http://localhost:11434`
 - `OLLAMA_MODEL=qwen3:14b`
+- `OLLAMA_WORKER_MODEL=qwen3:4b`
+- `OLLAMA_VISION_MODEL=qwen3-vl:8b`
 - `OLLAMA_EMBED_MODEL=nomic-embed-text`
 - `DB_PATH=data/hana.db`
 - `CHROMA_PATH=data/chroma`
@@ -158,9 +164,8 @@ assets/character/
 
 Important notes:
 
-- Live2D folders work with the current backend model scan.
-- PMX rendering exists in the frontend, but the current backend `/settings/models` scan only picks up folders containing `.model3.json`.
-- That means PMX files can be placed locally now, but they may not appear in Settings until backend model discovery is expanded.
+- Live2D and PMX folders are both supported by the current backend model scan.
+- The Settings UI shows both types and lets users switch between them.
 
 If no valid model is found, the app shows a placeholder character instead of crashing.
 
@@ -187,6 +192,24 @@ HUGGINGFACE_TOKEN=
 ```
 
 These are not required for the current basic local chat/overlay flow.
+
+## AI Model Selection Policy
+
+The current product policy is:
+
+- main chat model: user-selectable in Settings
+- worker model: fixed
+- vision model: fixed
+
+Default intended local setup:
+
+```text
+Chat   : qwen3:14b
+Worker : qwen3:4b
+Vision : qwen3-vl:8b
+```
+
+Only chat-role models should be exposed in the frontend settings UI.
 
 ### 4. Google Calendar credentials
 
@@ -233,6 +256,8 @@ Contents:
 ```env
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen3:14b
+OLLAMA_WORKER_MODEL=qwen3:4b
+OLLAMA_VISION_MODEL=qwen3-vl:8b
 OLLAMA_EMBED_MODEL=nomic-embed-text
 DB_PATH=data/hana.db
 REDIS_URL=redis://localhost:6379/0
