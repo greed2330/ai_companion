@@ -1340,6 +1340,12 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 - mood stream fallback은 런타임에서 강제 발생시키지 않았고 Jest로만 검증함
 - `npm run electron:dev`는 권한 상승 후 실행 시작은 됐지만 GUI 장기 실행이라 Codex 셸에서 타임아웃됨. 수동 UI 확인은 오너 환경에서 최종 체크 필요
 - backend `backend/routers/settings.py` 기준 현재 모델 스캔이 Live2D 전용이라 PMX 선택 UI가 실제로 채워지지 않을 수 있음
+- 후속 작업 우선순위:
+  - 1순위 Claude Code: `/settings/models` PMX 스캔 확장, 필요 시 AI 모델 목록/선택 API 설계
+  - 2순위 Codex: 백엔드 계약 확정 후 PMX/Live2D 범용 매핑 UI 보강, AI 모델 선택 UI 연결
+- 오너가 지금 당장 준비해야 하는 필수 준비물은 없음. 있으면 좋은 것만 있음:
+  - 로컬 테스트용 Live2D/PMX 모델 샘플 유지
+  - 지원할 Ollama 모델 후보 정리 (`qwen3:14b`, `qwen3:8b`, `qwen3:4b` 등)
 
 ---
 
