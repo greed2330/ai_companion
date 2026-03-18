@@ -49,7 +49,7 @@ def _scan_models() -> list[dict]:
         if not entry.is_dir():
             continue
 
-        live2d_files = list(entry.glob("*.model3.json"))
+        live2d_files = list(entry.rglob("*.model3.json"))
         if live2d_files:
             model_file = live2d_files[0]
             models.append({
@@ -60,7 +60,7 @@ def _scan_models() -> list[dict]:
             })
             continue
 
-        pmx_files = list(entry.glob("*.pmx"))
+        pmx_files = list(entry.rglob("*.pmx"))
         if pmx_files:
             model_file = pmx_files[0]
             models.append({

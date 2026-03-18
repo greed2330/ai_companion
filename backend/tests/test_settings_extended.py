@@ -166,6 +166,35 @@ _FAKE_TAGS = {
 
 
 @pytest.mark.asyncio
+async def test_settings_models_nested_structure(tmp_path, monkeypatch, client):
+    """중첩 폴더 안에 있는 모델 파일도 탐색돼야 한다."""
+    import backend.routers.settings as settings_mod
+
+    char_root = tmp_path / "assets" / "character"
+
+    # live2d 파일이 하위 폴더 안에 있는 경우
+    d1 = char_root / "nanoka"
+    (d1 / "runtime").mkdir(parents=True)
+    (d1 / "runtime" / "nanoka.model3.json").touch()
+
+    # pmx 파일이 하위 폴더 안에 있는 경우
+    d2 = char_root / "furina"
+    (d2 / "model").mkdir(parents=True)
+    (d2 / "model" / "furina.pmx").touch()
+
+    monkeypatch.setattr(settings_mod, "_CHARACTER_ROOT", char_root)
+
+    resp = await client.get("/settings/models")
+    assert resp.status_code == 200
+    models = {m["id"]: m for m in resp.json()["models"]}
+
+    assert models["nanoka"]["type"] == "live2d"
+    assert "runtime/nanoka.model3.json" in models["nanoka"]["path"]
+    assert models["furina"]["type"] == "pmx"
+    assert "model/furina.pmx" in models["furina"]["path"]
+
+
+@pytest.mark.asyncio
 async def test_llm_models_list(monkeypatch, client):
     """GET /settings/llm/models — Ollama mock 응답 기반 모델 목록 반환."""
     import backend.routers.settings as settings_mod
