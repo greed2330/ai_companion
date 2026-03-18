@@ -1340,12 +1340,19 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 - mood stream fallback은 런타임에서 강제 발생시키지 않았고 Jest로만 검증함
 - `npm run electron:dev`는 권한 상승 후 실행 시작은 됐지만 GUI 장기 실행이라 Codex 셸에서 타임아웃됨. 수동 UI 확인은 오너 환경에서 최종 체크 필요
 - backend `backend/routers/settings.py` 기준 현재 모델 스캔이 Live2D 전용이라 PMX 선택 UI가 실제로 채워지지 않을 수 있음
+- 오너가 확정한 Ollama 모델 정책:
+  - 메인 채팅 모델(설정 UI에서만 교체 가능): `qwen3:14b` 기본값
+  - 소형 작업 모델(고정): `qwen3:4b`
+  - 비전 모델(고정): `qwen3-vl:8b`
+- AI 모델 선택 UX 범위:
+  - 프런트 설정 UI에서는 메인 채팅 모델만 선택/교체
+  - 소형 모델, 비전 모델은 UI에서 노출하지 않고 고정 유지
 - 후속 작업 우선순위:
-  - 1순위 Claude Code: `/settings/models` PMX 스캔 확장, 필요 시 AI 모델 목록/선택 API 설계
-  - 2순위 Codex: 백엔드 계약 확정 후 PMX/Live2D 범용 매핑 UI 보강, AI 모델 선택 UI 연결
+  - 1순위 Claude Code: `/settings/models` PMX 스캔 확장, 메인 채팅용 AI 모델 목록/선택 API 설계
+  - 2순위 Codex: 백엔드 계약 확정 후 PMX/Live2D 범용 매핑 UI 보강, 메인 채팅 모델 선택 UI 연결
 - 오너가 지금 당장 준비해야 하는 필수 준비물은 없음. 있으면 좋은 것만 있음:
   - 로컬 테스트용 Live2D/PMX 모델 샘플 유지
-  - 지원할 Ollama 모델 후보 정리 (`qwen3:14b`, `qwen3:8b`, `qwen3:4b` 등)
+  - 로컬 설치 모델 유지: `qwen3:14b`, `qwen3:4b`, `qwen3-vl:8b`
 
 ---
 
