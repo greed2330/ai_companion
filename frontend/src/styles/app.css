@@ -82,6 +82,8 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
   padding: 18px;
   border: 1px solid var(--panel-border);
   border-radius: 24px;
@@ -99,6 +101,7 @@ body {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
+  -webkit-app-region: drag;
 }
 
 .chat-overlay__header p,
@@ -113,6 +116,41 @@ body {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+.window-title {
+  min-width: 0;
+}
+
+.window-toolbar,
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.window-controls {
+  gap: 6px;
+}
+
+.window-control-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.window-control-button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.window-control-button--danger:hover {
+  background: rgba(255, 99, 99, 0.22);
 }
 
 .chat-window {
@@ -161,7 +199,8 @@ body {
 
 .feedback-row button,
 .composer button,
-.settings-model {
+.settings-model,
+.window-control-button {
   border: 0;
   cursor: pointer;
 }
@@ -206,6 +245,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
 }
 
 .settings-section {

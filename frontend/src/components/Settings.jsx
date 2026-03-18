@@ -66,6 +66,12 @@ function Settings({ onModelSelected = () => {} }) {
     try {
       const payload = await selectModel(modelId);
       setCurrentCharacterModel(payload.current);
+      const channel = new BroadcastChannel("hana-overlay");
+      channel.postMessage({
+        type: "character_model_selected",
+        modelId: payload.current
+      });
+      channel.close();
       onModelSelected(payload.current);
     } catch (selectError) {
       setError(selectError.message);
@@ -81,20 +87,58 @@ function Settings({ onModelSelected = () => {} }) {
     }
   }
 
+  function handleMinimize() {
+    window.hanaDesktop?.minimizeWindow?.();
+  }
+
+  function handleMaximizeToggle() {
+    window.hanaDesktop?.toggleMaximizeWindow?.();
+  }
+
+  function handleClose() {
+    window.hanaDesktop?.closeWindow?.();
+  }
+
   return (
     <section className="settings-panel">
       <header className="settings-panel__header">
-        <div>
-          <h1>모델 설정</h1>
-          <p>채팅 핫키: Alt+H</p>
+        <div className="window-title">
+          <h1>Model Settings</h1>
+          <p>Chat hotkey: Alt+H</p>
+        </div>
+        <div className="window-controls">
+          <button
+            type="button"
+            className="window-control-button"
+            aria-label="Minimize window"
+            onClick={handleMinimize}
+          >
+            _
+          </button>
+          <button
+            type="button"
+            className="window-control-button"
+            aria-label="Maximize window"
+            onClick={handleMaximizeToggle}
+          >
+            []
+          </button>
+          <button
+            type="button"
+            className="window-control-button window-control-button--danger"
+            aria-label="Close window"
+            onClick={handleClose}
+          >
+            X
+          </button>
         </div>
       </header>
 
       <section className="settings-section">
         <div className="settings-section__header">
           <div>
-            <h2>캐릭터 모델</h2>
-            <p>Live2D와 PMX 모델을 여기서 바꿀 수 있어.</p>
+            <h2>Character Models</h2>
+            <p>Switch between Live2D and PMX character models.</p>
           </div>
         </div>
         <div className="settings-model-list">
@@ -115,8 +159,8 @@ function Settings({ onModelSelected = () => {} }) {
       <section className="settings-section">
         <div className="settings-section__header">
           <div>
-            <h2>AI 모델</h2>
-            <p>메인 채팅 모델만 바꿀 수 있고 worker/vision은 고정이야.</p>
+            <h2>AI Models</h2>
+            <p>Only the main chat model can be changed here. Worker and vision stay fixed.</p>
           </div>
         </div>
         <div className="settings-model-list">

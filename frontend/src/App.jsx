@@ -35,13 +35,15 @@ function CharacterScreen() {
   useEffect(() => {
     const channel = new BroadcastChannel("hana-overlay");
     channel.onmessage = (event) => {
-      if (event.data?.type !== "bubble") {
-        return;
+      if (event.data?.type === "bubble") {
+        setSpeech({ message: event.data.message || "", visible: true });
+        if (event.data.mood) {
+          setMood(event.data.mood);
+        }
       }
 
-      setSpeech({ message: event.data.message || "", visible: true });
-      if (event.data.mood) {
-        setMood(event.data.mood);
+      if (event.data?.type === "character_model_selected") {
+        setCurrentModelId(event.data.modelId || null);
       }
     };
 
