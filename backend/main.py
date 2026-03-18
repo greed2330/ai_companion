@@ -37,6 +37,7 @@ _setup_logging()
 async def lifespan(app: FastAPI):
     logger = logging.getLogger(__name__)
     logger.info("HANA backend starting up")
+    os.makedirs("data", exist_ok=True)
     await init_db()
     logger.info("DB initialized")
     yield
