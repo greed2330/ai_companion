@@ -30,13 +30,36 @@ body {
 }
 
 .character-stage {
-  position: relative;
   width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px;
+}
+
+.character-stage--with-bubble .speech-bubble-slot {
+  flex-basis: 132px;
+}
+
+.speech-bubble-slot {
+  flex: 0 0 0;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  pointer-events: none;
+}
+
+.character-figure {
+  position: relative;
+  flex: 1;
+  min-width: 0;
   height: 100%;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 8px;
 }
 
 .character-canvas,
@@ -46,6 +69,8 @@ body {
 }
 
 .character-placeholder {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -64,16 +89,31 @@ body {
 }
 
 .speech-bubble {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  right: 12px;
+  position: relative;
+  width: 100%;
   padding: 14px 16px;
   border-radius: 18px 18px 18px 6px;
   color: #10161e;
   font-weight: 700;
   box-shadow: var(--panel-shadow);
   z-index: 2;
+  display: flex;
+  align-items: center;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.speech-bubble::after {
+  content: "";
+  position: absolute;
+  right: 22px;
+  bottom: -10px;
+  width: 18px;
+  height: 18px;
+  background: inherit;
+  transform: rotate(45deg);
+  border-radius: 4px;
 }
 
 .chat-overlay,

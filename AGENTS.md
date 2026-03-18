@@ -1904,6 +1904,7 @@ Open backend-side issues that block or weaken the current Phase 3 frontend:
   - main chat default: `qwen3:14b`
   - worker fixed: `qwen3:4b`
   - vision fixed: `qwen3-vl:8b`
+- Backend should also reject non-chat model IDs during `POST /settings/llm/select` and recover safely if `data/settings.json` contains an invalid or non-chat model.
 
 4. Re-check the real `/mood/stream` behavior against AGENTS section 9-1.
 - Frontend has entered polling fallback mode during local testing.

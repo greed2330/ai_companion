@@ -14,6 +14,8 @@ function CharacterOverlay({
   const rendererRef = useRef(null);
   const [hasRenderableModel, setHasRenderableModel] = useState(false);
 
+  const hasSpeech = Boolean(speechVisible && speechMessage);
+
   useEffect(() => {
     async function mountModel() {
       const container = containerRef.current;
@@ -51,22 +53,29 @@ function CharacterOverlay({
       rendererRef.current?.cleanup?.();
       rendererRef.current = null;
     };
-  }, [modelPath]);
+  }, [modelPath, mood]);
 
   useEffect(() => {
     applyMood(rendererRef.current, mood);
   }, [mood]);
 
   return (
-    <section className="character-stage" data-testid="character-overlay">
-      <SpeechBubble message={speechMessage} mood={mood} visible={speechVisible} />
-      <div className="character-canvas" ref={containerRef} />
-      {!hasRenderableModel ? (
-        <div className="character-placeholder">
-          <div className="character-placeholder__avatar" />
-          <strong>{modelName || "하나"}</strong>
-        </div>
-      ) : null}
+    <section
+      className={`character-stage ${hasSpeech ? "character-stage--with-bubble" : ""}`}
+      data-testid="character-overlay"
+    >
+      <div className="speech-bubble-slot">
+        <SpeechBubble message={speechMessage} mood={mood} visible={speechVisible} />
+      </div>
+      <div className="character-figure">
+        <div className="character-canvas" ref={containerRef} />
+        {!hasRenderableModel ? (
+          <div className="character-placeholder">
+            <div className="character-placeholder__avatar" />
+            <strong>{modelName || "하나"}</strong>
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
