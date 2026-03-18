@@ -344,6 +344,30 @@ Mineflayer로 환경 상태 읽음
 > **구현:** `GET /settings/autonomous` → 현재 토글 상태 반환. `POST /settings/autonomous` → 토글 변경.
 > `data/autonomous.json` 저장. Celery 태스크들이 이 설정을 읽고 동작 여부 판단.
 
+#### 능동 알림 주기 규칙
+
+프론트는 말풍선을 띄우기 전에 `POST /proactive/check`를 반드시 호출한다.
+백엔드가 아래 규칙을 검사하고 허용/거부를 응답한다.
+
+| 이벤트 | 주기 | 하루 최대 | 비고 |
+|--------|------|-----------|------|
+| 자리 비움 SLEEPY (`afk_sleepy`) | 제한 없음 | 제한 없음 | 복귀 시 `afk_return` 즉시 반응 |
+| 야식 말풍선 (`night_snack`) | — | 1회 | 밤 11시 이후 첫 1회만 |
+| 새벽 걱정 말풍선 (`late_night`) | — | 1회 | 새벽 2시 이후 첫 1회만 |
+| 기분 체크 (`mood_check`) | — | 1회 | 하루 첫 대화 시 |
+| 집중 모드 확인 (`focus_check`) | 30분 | 3회/세션 | 집중 모드 진입 후 |
+| 작업 시간 알림 (`work_time_1h/3h/5h`) | 1h/3h/5h | 각 1회 | 세션당 |
+| 자율 말 걸기 (`autonomous_talk`) | 최소 60분 | 10회 | 무시 3회 시 그날 중단 |
+| 날씨 인사 (`weather_morning`) | — | 1회 | 하루 첫 실행 시 |
+| 특별 날 이벤트 (`special_day`) | — | 1회 | 해당 날짜 |
+
+추가 규칙:
+```
+오너 타이핑 중 → 모든 능동 알림 대기 (프론트 책임)
+같은 주제 반복 → 하루 내 중복 없음 (백엔드 체크)
+무시 3회 이상 → 당일 autonomous_talk 중단 (백엔드 체크)
+```
+
 ---
 
 ### 3-8. 감정 시스템
@@ -1470,6 +1494,57 @@ tone 값: `"casual"` | `"friendly"` | `"formal"`
 
 변경 즉시 `data/autonomous.json` 저장. Celery 태스크들이 이 파일을 읽어 동작 여부 판단.
 
+---
+
+**POST /proactive/check** — 능동 알림 주기 체크 (Phase 4)
+
+프론트가 말풍선 띄우기 전에 백엔드에 주기 체크 요청. 가능하면 log_id 반환.
+
+요청:
+```json
+{"event_type": "night_snack"}
+```
+
+응답 (가능):
+```json
+{"can_trigger": true, "log_id": "uuid"}
+```
+
+응답 (불가):
+```json
+{"can_trigger": false, "reason": "already_triggered_today"}
+```
+
+---
+
+**POST /proactive/ignored** — 오너 무시 기록 (Phase 4)
+
+오너가 말풍선을 무시했을 때 프론트가 호출.
+
+요청:
+```json
+{"log_id": "uuid"}
+```
+
+응답:
+```json
+{"success": true}
+```
+
+---
+
+**GET /proactive/status** — 오늘 능동 알림 현황 조회 (Phase 4)
+
+응답:
+```json
+{
+  "mood_check_done_today": false,
+  "autonomous_talk_count_today": 3,
+  "autonomous_talk_remaining_today": 7,
+  "last_autonomous_talk_minutes_ago": 45
+}
+```
+
 ### 9-2. 브랜치 전략
 > **main PR 자격 규칙:** `dev`에서 통합과 검증이 끝나고, 에러가 없다는 확인이 완료되어야만 `main` 브랜치 PR을 올릴 수 있습니다.
 > `main`은 최신이라고 해서 바로 기준으로 삼는 브랜치가 아니라, `dev` 검증 통과 후에만 올라가는 최종 승격 브랜치입니다.
@@ -1568,11 +1643,11 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/agents-ux-update (작업 중)
-현재 작업 중인 파일: AGENTS.md
-마지막 완료: Phase 3 버그픽스 — /chat 400, SSE 헤더, 모델 스캔 정렬 (2026-03-18)
+현재 작업 브랜치: claude/proactive-timing (커밋 완료, PR 대기)
+현재 작업 중인 파일: 없음 (소유권 해제)
+마지막 완료: Phase 4 능동 알림 주기 제어 시스템 — proactive_log, /proactive/* 엔드포인트 3개 (2026-03-19)
 블로커: 없음
-다음 작업: AGENTS.md UX/감정/안전필터/Phase 7.5 문서 업데이트 후 dev로 PR
+다음 작업: dev 머지 후 Phase 4 나머지 (MCP, 화면인식 등) 대기
 ```
 
 **완료된 태스크 (Phase 1):**
@@ -1629,12 +1704,26 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] tests/test_settings_extended.py: CJK 파일명 + 공백 경로 케이스 추가
 - [x] tests/test_mood_stream.py: SSE 헤더 + 이벤트 shape 검증 (2개 추가) — 51/51 전부 통과
 
+**완료된 태스크 (Phase 4 능동 알림 주기 제어):**
+- [x] backend/models/schema.py: proactive_log 테이블 추가
+- [x] backend/services/proactive_service.py: can_trigger / log_trigger / mark_ignored 구현
+- [x] backend/routers/proactive.py: POST /proactive/check, POST /proactive/ignored, GET /proactive/status
+- [x] backend/main.py: proactive_router 등록
+- [x] AGENTS.md 3-7: 능동 알림 주기 규칙 테이블 추가
+- [x] AGENTS.md 9-1: /proactive/check, /proactive/ignored, /proactive/status 계약 추가
+- [x] backend/tests/test_proactive.py: 17개 테스트 — 68/68 전부 통과
+
 **Codex에게 전달할 브리핑:**
-- API 계약 변경 없음. 버그픽스만.
-- /chat 400 에러 수정됨 — `"think": False` payload 필드 추가
-- /mood/stream SSE 헤더 보강 — nginx 환경에서도 드롭 없이 연결 유지
-- /settings/models rglob 정렬 추가 — 같은 폴더에 PMX 여러 개일 때 결정론적 선택
-- mem0 실제 동작에는 ollama에 nomic-embed-text 모델 필요: ollama pull nomic-embed-text
+- 능동 알림 주기 제어 API 완료.
+- 프론트는 말풍선 띄우기 전 `POST /proactive/check` 필수 호출.
+- 오너 무시 감지 시 `POST /proactive/ignored` 호출.
+- 오너 타이핑 중 알림 대기는 프론트 책임 (백엔드 미관여).
+- API 계약: AGENTS.md 9-1 /proactive/* 섹션 참고.
+- 버그픽스 이전 브리핑:
+  - /chat 400 에러 수정됨 — `"think": False` payload 필드 추가
+  - /mood/stream SSE 헤더 보강 — nginx 환경 드롭 방지
+  - /settings/models rglob 정렬 추가 — PMX 여러 개일 때 결정론적 선택
+  - mem0 실제 동작에는 ollama에 nomic-embed-text 필요: ollama pull nomic-embed-text
 
 ---
 
