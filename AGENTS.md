@@ -34,7 +34,7 @@
 | 항목 | 비용 | 비고 |
 |------|------|------|
 | 전체 소프트웨어 스택 | **무료** | Ollama, FastAPI, SQLite, Whisper, Kokoro, Coqui, Mineflayer 등 전부 무료 오픈소스 |
-| Brave Search API | **무료** (월 2,000회) | 초과 시 유료. 개인 사용이면 충분. |
+| Serper API | **무료** 2,500회/월 | 카드 불필요. https://serper.dev |
 | Booth.pm Live2D | **무료 ~ 유료** | 무료 모델만 사용 가능. Phase 3 이후 선택사항. |
 | 마인크래프트 | **이미 소유** 전제 | 서버는 로컬에서 무료로 열 수 있음. |
 | HuggingFace 모델 | **무료** | Qwen3 등 오픈소스 모델 무료 다운로드. |
@@ -216,7 +216,7 @@ Kokoro TTS (로컬 음성합성)
 | 파일 읽기/쓰기/검색 | mcp-server-filesystem | 4 |
 | 터미널 명령 실행 | mcp-server-shell + 화이트리스트 필터 | 4 |
 | 브라우저 자동화 | mcp-server-playwright | 4 |
-| 웹 검색 | Brave Search MCP | ⚠️ 월 2,000회까지 무료. 초과 시 유료. 개인 사용이면 2,000회로 충분. |
+| 웹 검색 | Serper MCP | 무료 2,500회/월. 카드 불필요. https://serper.dev |
 | 구글 캘린더 | mcp-server-google-calendar | 4 |
 | GitHub 연동 | mcp-server-github (선택) | 4 |
 | MCP 실행 히스토리 | 모든 MCP 실행 내역 DB 저장. "저번에 어떤 명령 썼더라?" 질의 가능. | 4 |
@@ -764,7 +764,7 @@ ORDER BY f.final_score DESC;
 - [ ] MCP: filesystem
 - [ ] MCP: shell (검문소 적용)
 - [ ] MCP: playwright
-- [ ] Brave Search API + MCP 연동
+- [ ] Serper API + MCP 연동
 - [ ] 구글 캘린더 OAuth + MCP 연동
 - [ ] mcp_history DB 저장 + 조회 기능
 - [ ] OS 접근성 API 화면 텍스트 추출 (Windows: pywinauto / macOS: pyobjc)
@@ -1098,12 +1098,22 @@ heartbeat:
     {
       "id": "nanoka",
       "path": "assets/character/nanoka/nanoka.model3.json",
-      "name": "Nanoka"
+      "name": "Nanoka",
+      "type": "live2d"
+    },
+    {
+      "id": "furina",
+      "path": "assets/character/furina/furina.pmx",
+      "name": "Furina",
+      "type": "pmx"
     }
   ],
   "current": "nanoka"
 }
 ```
+
+type 값: `"live2d"` | `"pmx"`
+우선순위: .model3.json(live2d) > .pmx. 둘 다 없으면 목록에서 제외.
 
 ---
 
@@ -1118,6 +1128,55 @@ heartbeat:
 ```json
 {"success": true, "current": "nanoka"}
 ```
+
+---
+
+**GET /settings/llm/models** — LLM 모델 목록 조회
+
+Ollama에 설치된 모델 목록을 반환한다. role이 "chat"인 모델만 사용자가 변경 가능.
+
+응답:
+```json
+{
+  "models": [
+    { "id": "qwen3:14b",   "name": "Qwen3 14B",   "role": "chat",   "current": true  },
+    { "id": "qwen3:4b",    "name": "Qwen3 4B",    "role": "worker", "current": false },
+    { "id": "qwen3-vl:8b", "name": "Qwen3 Vl 8B", "role": "vision", "current": false }
+  ],
+  "current_chat_model": "qwen3:14b"
+}
+```
+
+role 정의 (고정):
+- `"chat"`   → 메인 대화 모델 (사용자 변경 가능)
+- `"worker"` → 채점/기억 추출 전용. 고정: `OLLAMA_WORKER_MODEL` env var
+- `"vision"` → 화면 인식 전용. 고정: `OLLAMA_VISION_MODEL` env var
+
+에러 응답:
+```json
+{"error": true, "code": "OLLAMA_UNAVAILABLE", "message": "Ollama에 연결할 수 없어."}
+```
+
+---
+
+**POST /settings/llm/select** — LLM 챗 모델 변경
+
+요청:
+```json
+{"model_id": "qwen3:14b"}
+```
+
+응답:
+```json
+{"success": true, "current_chat_model": "qwen3:14b"}
+```
+
+에러 응답 (Ollama에 없는 모델):
+```json
+{"error": true, "code": "MODEL_NOT_FOUND", "message": "Model not installed in Ollama"}
+```
+
+선택 즉시 in-memory 업데이트 + `data/settings.json` 저장. 서버 재시작 없이 반영됨.
 
 ---
 
@@ -1233,7 +1292,7 @@ chore    설정, 패키지 등
 ```
 Phase 1 (대화 AI 코어)     : ✅ 백엔드 완료, 프론트 진행 중
 Phase 2 (기억)             : ✅ 백엔드 완료 (merged)
-Phase 3 (화면 상주)        : 🔵 백엔드 진행 중 (mood stream + settings)
+Phase 3 (화면 상주)        : 🔵 백엔드 PR 대기 중 (follow-up: PMX + LLM 선택 API)
 Phase 4 (MCP/도구)         : ⬜ 미시작
 Phase 4.5 (음성)           : ⬜ 미시작
 Phase 5 (파인튜닝)         : ⬜ 미시작
@@ -1247,11 +1306,11 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase3-mood-stream (커밋 완료, PR 대기 중)
+현재 작업 브랜치: claude/phase3-followup (커밋 완료, PR 대기 중)
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 3 백엔드 — mood stream + 무드 엔진 + 모델 설정 API (2026-03-18)
+마지막 완료: Phase 3 follow-up — PMX 스캔 + LLM 모델 선택 API (2026-03-18)
 블로커: 없음
-다음 작업: Phase 3 Codex 프론트 완료 후 dev 통합 검증 대기
+다음 작업: dev 통합 검증 후 Codex LLM 선택 UI 구현 대기
 ```
 
 **완료된 태스크 (Phase 1):**
@@ -1290,14 +1349,22 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 - [x] AGENTS.md 9-1 API 계약서 신규 엔드포인트 추가
 - [x] backend/tests/test_mood_stream.py: 14개 테스트 — 38/38 전부 통과
 
+**완료된 태스크 (Phase 3 follow-up):**
+- [x] services/settings_service.py: in-memory 공유 상태 + settings.json I/O (get/set_current_chat_model)
+- [x] routers/settings.py: PMX 스캔 추가 (type 필드), GET /settings/llm/models, POST /settings/llm/select
+- [x] services/llm.py: OLLAMA_MODEL 상수 제거, settings_service.get_current_chat_model() 연동
+- [x] main.py: lifespan에서 data/ 디렉토리 자동 생성
+- [x] .env.example: OLLAMA_WORKER_MODEL, OLLAMA_VISION_MODEL 추가
+- [x] AGENTS.md 9-1: /settings/models type 필드, LLM 엔드포인트 2개 계약서 추가
+- [x] backend/tests/test_settings_extended.py: 7개 테스트 — 45/45 전부 통과
+
 **Codex에게 전달할 브리핑:**
-- Phase 1/2 API 계약서 완전히 유지됨 — 기존 프론트 호출 방식 변경 없음
-- Phase 3 신규 엔드포인트 (AGENTS.md 9-1 참고):
-  - GET /mood/stream — SSE. 연결 즉시 현재 무드 push, 무드 바뀔 때마다 push, 30초 heartbeat
-  - GET /settings/models — assets/character/ 스캔 결과 반환
-  - POST /settings/models/select — 모델 선택 + /mood/stream으로 model_change 이벤트 push
-- /mood (GET) 기존 엔드포인트 유지됨 — 초기 로드용으로 그대로 사용 가능
-- mood stream 이벤트 타입: "mood_change" (무드 변경), "model_change" (모델 변경)
+- 기존 API 계약 변경 없음. `/settings/models` 응답에 `type` 필드만 추가됨 (live2d | pmx)
+- 신규 엔드포인트 (AGENTS.md 9-1 참고):
+  - GET /settings/llm/models — Ollama 설치 모델 목록. role: chat/worker/vision 구분
+  - POST /settings/llm/select — 챗 모델 변경. 즉시 반영 (재시작 불필요)
+- worker/vision 모델은 고정 (env var로만 변경). 사용자가 UI에서 선택 가능한 건 role=chat 모델만
+- Ollama가 꺼져 있으면 /settings/llm/models 와 /settings/llm/select 모두 503 반환
 - mem0 실제 동작에는 ollama에 nomic-embed-text 모델 필요: ollama pull nomic-embed-text
 
 ---
@@ -1306,11 +1373,11 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 > 이 섹션은 Codex만 수정합니다.
 
 ```
-현재 작업 브랜치: codex/phase1-frontend
+현재 작업 브랜치: codex/phase3-settings
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 1 프론트엔드 채팅/SSE 구현 + 테스트 통과, 브랜치 승격 규칙 문서 명시
-블로커: docker-compose.test.yml 파싱 오류로 Docker 테스트 미실행
-다음 작업: origin/dev 기준으로 브랜치 재정렬 후 dev 검증 완료 시 PR
+마지막 완료: Phase 3 프런트엔드 마감 — PMX 대응 settings 반영, 메인 채팅 모델 선택 UI 구현, README 갱신
+블로커: 없음
+다음 작업: dev 기준 PR 준비 및 오너 최종 검증
 ```
 
 **완료된 태스크:**
@@ -1324,11 +1391,36 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 - [x] Jest/RTL 테스트 추가 (ChatWindow, CharacterOverlay, Hotkey)
 - [x] 프론트 로컬 실행 확인됨 / 백엔드 연동 확인
 - [x] 로컬 테스트 통과: `npm test` (frontend)
+- [x] Electron 이중 오버레이 창 + 설정 창 분리, 트레이 메뉴/Alt+H 토글 구현
+- [x] `useMoodStream` 추가: `/mood/stream` 구독, 5회 실패 시 `/mood` polling fallback
+- [x] CharacterOverlay 확장: Live2D/PMX 타입 감지, placeholder fallback, 말풍선 표시
+- [x] Chat overlay UI 업그레이드: 반투명 패널, mood indicator, assistant feedback 버튼
+- [x] Settings UI 구현: `/settings/models` 목록 렌더, 타입 배지, `/settings/models/select` 호출
+- [x] 프런트 전용 Docker 테스트 파일 추가: `frontend/docker-compose.frontend.yml`, `frontend/Dockerfile.test`
+- [x] Phase 3 테스트 추가 및 통과: `npm test` (12/12)
+- [x] Vite build 통과: `npm run build`
+- [x] Settings UI 확장: `/settings/llm/models` 렌더, role=chat 메인 채팅 모델만 선택 가능
+- [x] README 실행 가이드/비공개 자산 위치/AI 모델 정책 문서화
+- [x] Phase 3 마감 검증: `npm test` (13/13), `npm run build`
 
 **Claude Code에게 전달할 브리핑:**
 - Docker 테스트 명령(`docker-compose -f docker-compose.test.yml run frontend npm test`)은 현재 compose 파싱 오류로 실패:
   - `services.backend.environment.[0]: unexpected type map[string]interface {}`
   - 프론트 자체 Jest 테스트는 로컬에서 통과 완료
+- mood stream fallback은 런타임에서 강제 발생시키지 않았고 Jest로만 검증함
+- `npm run electron:dev`는 권한 상승 후 실행 시작은 됐지만 GUI 장기 실행이라 Codex 셸에서 타임아웃됨. 수동 UI 확인은 오너 환경에서 최종 체크 필요
+- backend `backend/routers/settings.py` 기준 현재 모델 스캔이 Live2D 전용이라 PMX 선택 UI가 실제로 채워지지 않을 수 있음
+- 오너가 확정한 Ollama 모델 정책:
+  - 메인 채팅 모델(설정 UI에서만 교체 가능): `qwen3:14b` 기본값
+  - 소형 작업 모델(고정): `qwen3:4b`
+  - 비전 모델(고정): `qwen3-vl:8b`
+- AI 모델 선택 UX 범위:
+  - 프런트 설정 UI에서는 메인 채팅 모델만 선택/교체
+  - 소형 모델, 비전 모델은 UI에서 노출하지 않고 고정 유지
+- Codex 후속 작업은 현재 없음. Phase 3 프런트 요구사항은 계약 기준으로 마감 완료
+- 오너가 지금 당장 준비해야 하는 필수 준비물은 없음. 있으면 좋은 것만 있음:
+  - 로컬 테스트용 Live2D/PMX 모델 샘플 유지
+  - 로컬 설치 모델 유지: `qwen3:14b`, `qwen3:4b`, `qwen3-vl:8b`
 
 ---
 

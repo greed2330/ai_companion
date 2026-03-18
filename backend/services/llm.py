@@ -11,11 +11,11 @@ from typing import AsyncIterator, Optional
 import httpx
 
 from backend.services.mood import MOOD_INSTRUCTIONS, get_mood
+from backend.services.settings_service import get_current_chat_model
 
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen3:14b")
 OLLAMA_KEEP_ALIVE: str = "-1"  # 항상 메모리 상주
 
 # AGENTS.md 2번 — 하나 성격 설정 기반 시스템 프롬프트
@@ -56,14 +56,15 @@ async def stream_chat(
     토큰 단위로 content 문자열을 yield한다.
     """
     system_prompt = build_system_prompt(memory_context)
+    model = get_current_chat_model()
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": model,
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "stream": True,
         "keep_alive": OLLAMA_KEEP_ALIVE,
     }
 
-    logger.info(f"Ollama connection attempt: model={OLLAMA_MODEL}")
+    logger.info(f"Ollama connection attempt: model={model}")
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",

@@ -5,7 +5,7 @@ import App from "./App";
 import "./styles/app.css";
 
 window.__VITE_API_BASE_URL__ =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  import.meta.env.VITE_API_BASE_URL || "";
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
