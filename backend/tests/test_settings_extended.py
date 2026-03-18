@@ -195,6 +195,43 @@ async def test_settings_models_nested_structure(tmp_path, monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_settings_models_cjk_and_spaces(tmp_path, monkeypatch, client):
+    """CJK 파일명, 공백 포함 경로도 정상 탐색돼야 한다."""
+    import backend.routers.settings as settings_mod
+
+    char_root = tmp_path / "assets" / "character"
+
+    # assets/character/March_7th/March 7th/march 7th.model3.json
+    d1 = char_root / "March_7th" / "March 7th"
+    d1.mkdir(parents=True)
+    (d1 / "march 7th.model3.json").touch()
+
+    # assets/character/furina/【芙宁娜】.pmx
+    d2 = char_root / "furina"
+    d2.mkdir(parents=True)
+    (d2 / "【芙宁娜】.pmx").touch()
+    (d2 / "【芙宁娜_荒】.pmx").touch()  # 여러 PMX — 알파벳순 첫 번째 선택
+
+    monkeypatch.setattr(settings_mod, "_CHARACTER_ROOT", char_root)
+
+    resp = await client.get("/settings/models")
+    assert resp.status_code == 200
+    models = {m["id"]: m for m in resp.json()["models"]}
+
+    # Live2D: 중첩 + 공백 경로
+    assert "March_7th" in models
+    assert models["March_7th"]["type"] == "live2d"
+    assert "march 7th.model3.json" in models["March_7th"]["path"]
+
+    # PMX: CJK 파일명, 여러 PMX 중 정렬 첫 번째 선택 확인
+    assert "furina" in models
+    assert models["furina"]["type"] == "pmx"
+    assert models["furina"]["path"].endswith(".pmx")
+    # 정렬상 【芙宁娜_荒】 < 【芙宁娜】 (_가 】보다 유니코드 값이 작음)
+    assert "【芙宁娜_荒】.pmx" in models["furina"]["path"]
+
+
+@pytest.mark.asyncio
 async def test_llm_models_list(monkeypatch, client):
     """GET /settings/llm/models — Ollama mock 응답 기반 모델 목록 반환."""
     import backend.routers.settings as settings_mod

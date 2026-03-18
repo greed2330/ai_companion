@@ -62,9 +62,15 @@ async def stream_chat(
         "messages": [{"role": "system", "content": system_prompt}] + messages,
         "stream": True,
         "keep_alive": OLLAMA_KEEP_ALIVE,
+        "think": False,  # qwen3 시리즈 thinking mode 비활성화 — 없으면 400 반환
     }
 
     logger.info(f"Ollama connection attempt: model={model}")
+    logger.debug(
+        f"Ollama payload (messages omitted): model={model}, "
+        f"stream={payload['stream']}, think={payload['think']}, "
+        f"message_count={len(payload['messages'])}"
+    )
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",

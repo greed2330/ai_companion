@@ -1306,11 +1306,11 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase3-followup (커밋 완료, PR 대기 중)
+현재 작업 브랜치: claude/phase3-bugfix (커밋 완료, PR 대기 중)
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 3 follow-up — PMX 스캔 + LLM 모델 선택 API (2026-03-18)
+마지막 완료: Phase 3 버그픽스 — /chat 400, SSE 헤더, 모델 스캔 정렬 (2026-03-18)
 블로커: 없음
-다음 작업: dev 통합 검증 후 Codex LLM 선택 UI 구현 대기
+다음 작업: dev 머지 후 Phase 4 대기
 ```
 
 **완료된 태스크 (Phase 1):**
@@ -1358,13 +1358,20 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 - [x] AGENTS.md 9-1: /settings/models type 필드, LLM 엔드포인트 2개 계약서 추가
 - [x] backend/tests/test_settings_extended.py: 7개 테스트 — 45/45 전부 통과
 
+**완료된 태스크 (Phase 3 버그픽스):**
+- [x] services/llm.py: `"think": False` 추가 — qwen3 시리즈 400 에러 수정
+- [x] services/llm.py: DEBUG 레벨 payload 로그 추가
+- [x] routers/mood.py: SSE 헤더 추가 — `Cache-Control: no-cache`, `X-Accel-Buffering: no`
+- [x] routers/settings.py: rglob 결과 sorted() 정렬 — deterministic 파일 선택
+- [x] tests/test_chat.py: Ollama payload think:false 검증, 모델 선택 반영 검증 (2개 추가)
+- [x] tests/test_settings_extended.py: CJK 파일명 + 공백 경로 케이스 추가
+- [x] tests/test_mood_stream.py: SSE 헤더 + 이벤트 shape 검증 (2개 추가) — 51/51 전부 통과
+
 **Codex에게 전달할 브리핑:**
-- 기존 API 계약 변경 없음. `/settings/models` 응답에 `type` 필드만 추가됨 (live2d | pmx)
-- 신규 엔드포인트 (AGENTS.md 9-1 참고):
-  - GET /settings/llm/models — Ollama 설치 모델 목록. role: chat/worker/vision 구분
-  - POST /settings/llm/select — 챗 모델 변경. 즉시 반영 (재시작 불필요)
-- worker/vision 모델은 고정 (env var로만 변경). 사용자가 UI에서 선택 가능한 건 role=chat 모델만
-- Ollama가 꺼져 있으면 /settings/llm/models 와 /settings/llm/select 모두 503 반환
+- API 계약 변경 없음. 버그픽스만.
+- /chat 400 에러 수정됨 — `"think": False` payload 필드 추가
+- /mood/stream SSE 헤더 보강 — nginx 환경에서도 드롭 없이 연결 유지
+- /settings/models rglob 정렬 추가 — 같은 폴더에 PMX 여러 개일 때 결정론적 선택
 - mem0 실제 동작에는 ollama에 nomic-embed-text 모델 필요: ollama pull nomic-embed-text
 
 ---
