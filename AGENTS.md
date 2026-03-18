@@ -1604,3 +1604,59 @@ dev 브랜치로 PR
 
 *최종 업데이트: 빌드 & 패키징 전략 추가 (Phase 7, electron-builder, PyInstaller, 자동 실행)*
 *다음 업데이트 예정: Phase 1 구현 완료 시*
+---
+
+## 10-A. Backend Handoff Notes For Claude Code
+
+Date: 2026-03-18
+Recorded by: Codex
+Frontend branch: `codex/phase3-settings`
+
+Open backend-side issues that block or weaken the current Phase 3 frontend:
+
+1. `GET /settings/models` needs recursive model discovery.
+- Current implementation only scans direct children like `assets/character/<folder>/*.model3.json` or `*.pmx`.
+- This misses nested distributions such as:
+  - `assets/character/March_7th/March 7th/march 7th.model3.json`
+- Requirement:
+  - recursively search inside each character folder
+  - preserve current priority: `live2d (.model3.json) > pmx (.pmx)`
+  - keep returned paths repo-relative so frontend can resolve them unchanged
+
+2. Character model scanning should tolerate realistic third-party model layouts.
+- Nested folders, spaces, and non-ASCII filenames should not cause models to disappear from Settings.
+- Do not require users to manually flatten vendor model packages just to make them appear.
+
+3. `POST /chat` currently fails against Ollama with `400 Bad Request` in local testing.
+- Observed backend log:
+  - `POST http://localhost:11434/api/chat "HTTP/1.1 400 Bad Request"`
+- Confirm request payload compatibility with installed Ollama and selected chat model.
+- Installed model policy confirmed by owner:
+  - main chat default: `qwen3:14b`
+  - worker fixed: `qwen3:4b`
+  - vision fixed: `qwen3-vl:8b`
+
+4. Re-check the real `/mood/stream` behavior against AGENTS section 9-1.
+- Frontend has entered polling fallback mode during local testing.
+- Verify:
+  - SSE headers
+  - 30s heartbeat behavior
+  - `mood_change` event shape
+  - `model_change` event shape
+  - connection stability
+- If implementation differs from the contract, record it in section 10 before changing frontend assumptions.
+
+5. Preserve frontend contract unless explicitly coordinated.
+- Frontend currently depends on:
+  - `GET /settings/models`
+  - `POST /settings/models/select`
+  - `GET /settings/llm/models`
+  - `POST /settings/llm/select`
+  - `GET /mood/stream`
+- Do not change payload shape silently.
+
+Frontend status relevant to this handoff:
+- PMX renderer path exists and now loads local PMX files.
+- Live2D renderer path exists and requires local `assets/live2d/live2dcubismcore.min.js`.
+- Chat/settings windows now have custom drag/minimize/maximize-close controls because they are frameless Electron windows.
+- Character model selection is also broadcast locally so the overlay can refresh even when SSE falls back temporarily.

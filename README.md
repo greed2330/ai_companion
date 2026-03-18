@@ -169,6 +169,18 @@ Important notes:
 
 If no valid model is found, the app shows a placeholder character instead of crashing.
 
+### 1-1. Live2D Cubism Core
+
+Live2D models also need the Cubism Core runtime file, which is not bundled in this repository.
+
+Place it here:
+
+```text
+assets/live2d/live2dcubismcore.min.js
+```
+
+Without this file, Live2D models will fall back to the placeholder even if `.model3.json` files exist.
+
 ### 2. Tray icon
 
 Optional but recommended:

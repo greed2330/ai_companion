@@ -69,7 +69,7 @@ function createAppWindow(route, options) {
     transparent: true,
     frame: false,
     alwaysOnTop: true,
-    skipTaskbar: true,
+    skipTaskbar: false,
     backgroundColor: "#00000000",
     webPreferences: {
       contextIsolation: true,
@@ -100,7 +100,8 @@ function createCharacterWindow() {
     y: display.workArea.y + display.workArea.height - height - 24,
     focusable: false,
     resizable: false,
-    hasShadow: false
+    hasShadow: false,
+    skipTaskbar: true
   });
   characterWindow.setIgnoreMouseEvents(true, { forward: true });
 }
@@ -113,11 +114,14 @@ function createChatWindow() {
   chatWindow = createAppWindow(WINDOW_ROUTES.chat, {
     width,
     height,
+    minWidth: 420,
+    minHeight: 520,
     x: display.workArea.x + display.workArea.width - width - 44,
     y: display.workArea.y + display.workArea.height - height - 60,
     focusable: true,
     show: false,
-    resizable: false
+    resizable: true,
+    skipTaskbar: false
   });
 }
 
@@ -129,11 +133,14 @@ function createSettingsWindow() {
   settingsWindow = createAppWindow(WINDOW_ROUTES.settings, {
     width,
     height,
+    minWidth: 380,
+    minHeight: 460,
     x: display.workArea.x + display.workArea.width - width - 64,
     y: display.workArea.y + 64,
     focusable: true,
     show: false,
-    resizable: false
+    resizable: true,
+    skipTaskbar: false
   });
 }
 
@@ -183,6 +190,26 @@ function registerIpcHandlers() {
   ipcMain.handle("assets:resolve-url", (_event, relativePath) =>
     resolveAssetUrl(relativePath)
   );
+  ipcMain.handle("window:minimize", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+  ipcMain.handle("window:maximize-toggle", (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!targetWindow) {
+      return false;
+    }
+
+    if (targetWindow.isMaximized()) {
+      targetWindow.unmaximize();
+      return false;
+    }
+
+    targetWindow.maximize();
+    return true;
+  });
+  ipcMain.handle("window:close", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.hide();
+  });
   ipcRegistered = true;
 }
 
