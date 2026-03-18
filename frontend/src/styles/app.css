@@ -208,6 +208,24 @@ body {
   gap: 12px;
 }
 
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.settings-section__header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.settings-section__header p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 .settings-model {
   display: flex;
   align-items: center;
@@ -221,4 +239,9 @@ body {
 .settings-model.is-active {
   outline: 2px solid var(--accent);
   background: rgba(142, 197, 255, 0.18);
+}
+
+.settings-model:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
