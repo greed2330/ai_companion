@@ -160,6 +160,10 @@ Never assume Claude Code knows something unless it's written there.
 
 Update section 10 after every meaningful unit of work — not just at PR time.
 
+### README Sync Rule
+- If startup steps, run commands, required local files, env vars, or setup flow change, update `README.md` in the same task.
+- Treat `README.md` as user-facing operational documentation, not optional cleanup.
+
 ### Git Strategy
 `main` PR eligibility rule: a branch earns the right to open a PR to `main` only after integration on `dev` is complete and `dev` verification finishes with no errors.
 
