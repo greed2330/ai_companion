@@ -1,8 +1,18 @@
 import { render, screen } from "@testing-library/react";
-import CharacterOverlay from "../components/CharacterOverlay";
+import CharacterOverlay, {
+  detectModelType
+} from "../components/CharacterOverlay";
 
-test("renders and reflects mood prop", () => {
-  render(<CharacterOverlay mood="FOCUSED" />);
-  expect(screen.getByTestId("character-overlay")).toBeInTheDocument();
-  expect(screen.getByLabelText("current-mood")).toHaveTextContent("FOCUSED");
+describe("CharacterOverlay", () => {
+  test("renders placeholder when no model file is present", () => {
+    render(<CharacterOverlay mood="IDLE" modelPath="" />);
+    expect(screen.getByText("하나")).toBeInTheDocument();
+  });
+
+  test("detects Live2D vs PMX correctly from path", () => {
+    expect(detectModelType("assets/character/nanoka/nanoka.model3.json")).toBe(
+      "live2d"
+    );
+    expect(detectModelType("assets/character/furina/furina.pmx")).toBe("pmx");
+  });
 });

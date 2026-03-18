@@ -1,6 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ChatWindow from "../components/ChatWindow";
 
+jest.mock("../services/feedback", () => ({
+  submitFeedback: jest.fn(() => Promise.resolve({ success: true }))
+}));
+
 function createSseResponse(chunks) {
   const encoder = new TextEncoder();
   const encoded = chunks.map((chunk) => encoder.encode(chunk));
@@ -15,6 +19,7 @@ function createSseResponse(chunks) {
             if (index >= encoded.length) {
               return { done: true, value: undefined };
             }
+
             const value = encoded[index];
             index += 1;
             return { done: false, value };
@@ -43,7 +48,13 @@ describe("ChatWindow", () => {
       ])
     );
 
-    render(<ChatWindow onMoodChange={jest.fn()} />);
+    render(
+      <ChatWindow
+        onMoodChange={jest.fn()}
+        onAssistantReply={jest.fn()}
+      />
+    );
+
     const input = screen.getByLabelText("message-input");
     fireEvent.change(input, { target: { value: "테스트" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -56,22 +67,29 @@ describe("ChatWindow", () => {
     fetch.mockResolvedValue(
       createSseResponse([
         'data: {"type":"token","content":"하"}\n',
-        'data: {"type":"token","content":"나"}\n',
+        'data: {"type":"token","content":"이"}\n',
         'data: {"type":"done","message_id":"m2","conversation_id":"c2","mood":"HAPPY"}\n',
         "data: [DONE]\n"
       ])
     );
 
     const onMoodChange = jest.fn();
-    render(<ChatWindow onMoodChange={onMoodChange} />);
+    const onAssistantReply = jest.fn();
+    render(
+      <ChatWindow
+        onMoodChange={onMoodChange}
+        onAssistantReply={onAssistantReply}
+      />
+    );
 
     fireEvent.change(screen.getByLabelText("message-input"), {
       target: { value: "안녕" }
     });
     fireEvent.click(screen.getByRole("button", { name: "전송" }));
 
-    expect(await screen.findByText("하나")).toBeInTheDocument();
+    expect(await screen.findByText("하이")).toBeInTheDocument();
     await waitFor(() => expect(onMoodChange).toHaveBeenCalledWith("HAPPY"));
+    expect(onAssistantReply).toHaveBeenCalledWith("하이", "HAPPY");
   });
 
   test("shows error message from SSE error event", async () => {
@@ -81,12 +99,19 @@ describe("ChatWindow", () => {
       ])
     );
 
-    render(<ChatWindow onMoodChange={jest.fn()} />);
+    render(
+      <ChatWindow
+        onMoodChange={jest.fn()}
+        onAssistantReply={jest.fn()}
+      />
+    );
     fireEvent.change(screen.getByLabelText("message-input"), {
       target: { value: "안녕" }
     });
     fireEvent.click(screen.getByRole("button", { name: "전송" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Ollama 연결 실패");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Ollama 연결 실패"
+    );
   });
 });

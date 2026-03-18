@@ -1,0 +1,6 @@
+services:
+  frontend-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    command: npm test -- --watchAll=false

@@ -1,13 +1,28 @@
 import { useState } from "react";
 import PropTypes from "prop-types";
+import { submitFeedback } from "../services/feedback";
 import { streamChat } from "../services/chat";
 
-function ChatWindow({ onMoodChange }) {
+function ChatWindow({ onMoodChange, onAssistantReply }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState("");
+  const [feedbackState, setFeedbackState] = useState({});
+
+  async function handleFeedback(messageId, score) {
+    if (!messageId || feedbackState[messageId]) {
+      return;
+    }
+
+    try {
+      await submitFeedback(messageId, score);
+      setFeedbackState((prev) => ({ ...prev, [messageId]: score }));
+    } catch (feedbackError) {
+      setError(feedbackError.message);
+    }
+  }
 
   async function submitMessage() {
     const trimmed = input.trim();
@@ -16,9 +31,10 @@ function ChatWindow({ onMoodChange }) {
     }
 
     const assistantId = `assistant-${Date.now()}`;
+    let assistantContent = "";
     setError("");
-    setIsStreaming(true);
     setInput("");
+    setIsStreaming(true);
     setMessages((prev) => [
       ...prev,
       { id: `user-${Date.now()}`, role: "user", content: trimmed },
@@ -30,6 +46,7 @@ function ChatWindow({ onMoodChange }) {
         message: trimmed,
         conversationId,
         onToken: (token) => {
+          assistantContent += token;
           setMessages((prev) =>
             prev.map((message) =>
               message.id === assistantId
@@ -39,19 +56,21 @@ function ChatWindow({ onMoodChange }) {
           );
         },
         onDone: (event) => {
+          const nextMood = event.mood || "IDLE";
           setConversationId(event.conversation_id || conversationId);
-          onMoodChange(event.mood || "IDLE");
+          onMoodChange(nextMood);
           setMessages((prev) =>
             prev.map((message) =>
               message.id === assistantId
                 ? {
                     ...message,
                     id: event.message_id || message.id,
-                    mood: event.mood || "IDLE"
+                    mood: nextMood
                   }
                 : message
             )
           );
+          onAssistantReply(assistantContent, nextMood);
         }
       });
     } catch (streamError) {
@@ -70,12 +89,29 @@ function ChatWindow({ onMoodChange }) {
 
   return (
     <section className="chat-window">
-      <h1>HANA Chat</h1>
       <div className="messages" aria-label="chat-messages">
         {messages.map((message) => (
-          <article key={message.id} className={`message ${message.role}`}>
+          <article key={message.id} className={`message message--${message.role}`}>
             <strong>{message.role === "user" ? "You" : "HANA"}</strong>
             <p>{message.content}</p>
+            {message.role === "assistant" && message.id.startsWith("assistant-") === false ? (
+              <div className="feedback-row">
+                <button
+                  type="button"
+                  aria-label={`thumbs-up-${message.id}`}
+                  onClick={() => handleFeedback(message.id, 5)}
+                >
+                  👍
+                </button>
+                <button
+                  type="button"
+                  aria-label={`thumbs-down-${message.id}`}
+                  onClick={() => handleFeedback(message.id, 1)}
+                >
+                  👎
+                </button>
+              </div>
+            ) : null}
           </article>
         ))}
       </div>
@@ -101,8 +137,9 @@ function ChatWindow({ onMoodChange }) {
   );
 }
 
-export default ChatWindow;
-
 ChatWindow.propTypes = {
-  onMoodChange: PropTypes.func.isRequired
+  onMoodChange: PropTypes.func.isRequired,
+  onAssistantReply: PropTypes.func.isRequired
 };
+
+export default ChatWindow;

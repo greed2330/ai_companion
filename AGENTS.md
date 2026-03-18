@@ -1306,11 +1306,11 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 > 이 섹션은 Codex만 수정합니다.
 
 ```
-현재 작업 브랜치: codex/phase1-frontend
+현재 작업 브랜치: codex/phase3-overlay
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 1 프론트엔드 채팅/SSE 구현 + 테스트 통과, 브랜치 승격 규칙 문서 명시
-블로커: docker-compose.test.yml 파싱 오류로 Docker 테스트 미실행
-다음 작업: origin/dev 기준으로 브랜치 재정렬 후 dev 검증 완료 시 PR
+마지막 완료: Phase 3 오버레이 프런트엔드 구현 완료, 테스트/빌드 통과
+블로커: backend `/settings/models`가 현재 `.model3.json`만 스캔해서 PMX 모델은 설정 목록에 노출되지 않음. 프런트는 PMX 렌더 경로를 구현했지만 백엔드 응답이 확장되어야 실제 전환 가능.
+다음 작업: dev 기준 PR 준비. Claude Code는 PMX 모델 스캔 계약 필요 여부 확인.
 ```
 
 **완료된 태스크:**
@@ -1324,11 +1324,35 @@ Phase 7 (빌드/패키징)      : ⬜ 미시작
 - [x] Jest/RTL 테스트 추가 (ChatWindow, CharacterOverlay, Hotkey)
 - [x] 프론트 로컬 실행 확인됨 / 백엔드 연동 확인
 - [x] 로컬 테스트 통과: `npm test` (frontend)
+- [x] Electron 이중 오버레이 창 + 설정 창 분리, 트레이 메뉴/Alt+H 토글 구현
+- [x] `useMoodStream` 추가: `/mood/stream` 구독, 5회 실패 시 `/mood` polling fallback
+- [x] CharacterOverlay 확장: Live2D/PMX 타입 감지, placeholder fallback, 말풍선 표시
+- [x] Chat overlay UI 업그레이드: 반투명 패널, mood indicator, assistant feedback 버튼
+- [x] Settings UI 구현: `/settings/models` 목록 렌더, 타입 배지, `/settings/models/select` 호출
+- [x] 프런트 전용 Docker 테스트 파일 추가: `frontend/docker-compose.frontend.yml`, `frontend/Dockerfile.test`
+- [x] Phase 3 테스트 추가 및 통과: `npm test` (12/12)
+- [x] Vite build 통과: `npm run build`
 
 **Claude Code에게 전달할 브리핑:**
 - Docker 테스트 명령(`docker-compose -f docker-compose.test.yml run frontend npm test`)은 현재 compose 파싱 오류로 실패:
   - `services.backend.environment.[0]: unexpected type map[string]interface {}`
   - 프론트 자체 Jest 테스트는 로컬에서 통과 완료
+- mood stream fallback은 런타임에서 강제 발생시키지 않았고 Jest로만 검증함
+- `npm run electron:dev`는 권한 상승 후 실행 시작은 됐지만 GUI 장기 실행이라 Codex 셸에서 타임아웃됨. 수동 UI 확인은 오너 환경에서 최종 체크 필요
+- backend `backend/routers/settings.py` 기준 현재 모델 스캔이 Live2D 전용이라 PMX 선택 UI가 실제로 채워지지 않을 수 있음
+- 오너가 확정한 Ollama 모델 정책:
+  - 메인 채팅 모델(설정 UI에서만 교체 가능): `qwen3:14b` 기본값
+  - 소형 작업 모델(고정): `qwen3:4b`
+  - 비전 모델(고정): `qwen3-vl:8b`
+- AI 모델 선택 UX 범위:
+  - 프런트 설정 UI에서는 메인 채팅 모델만 선택/교체
+  - 소형 모델, 비전 모델은 UI에서 노출하지 않고 고정 유지
+- 후속 작업 우선순위:
+  - 1순위 Claude Code: `/settings/models` PMX 스캔 확장, 메인 채팅용 AI 모델 목록/선택 API 설계
+  - 2순위 Codex: 백엔드 계약 확정 후 PMX/Live2D 범용 매핑 UI 보강, 메인 채팅 모델 선택 UI 연결
+- 오너가 지금 당장 준비해야 하는 필수 준비물은 없음. 있으면 좋은 것만 있음:
+  - 로컬 테스트용 Live2D/PMX 모델 샘플 유지
+  - 로컬 설치 모델 유지: `qwen3:14b`, `qwen3:4b`, `qwen3-vl:8b`
 
 ---
 
