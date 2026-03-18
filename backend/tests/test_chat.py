@@ -218,6 +218,92 @@ async def test_feedback_invalid_score(client):
 
 
 # ---------------------------------------------------------------------------
+# Ollama payload 검증
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chat_ollama_payload(monkeypatch):
+    """stream_chat이 Ollama에 보내는 payload에 think:false가 포함돼야 한다."""
+    import json as _json
+    from backend.services.llm import stream_chat
+
+    captured: dict = {}
+
+    async def fake_aiter_lines():
+        yield _json.dumps({"message": {"content": "안"}, "done": False})
+        yield _json.dumps({"message": {"content": ""}, "done": True})
+
+    class _FakeResponse:
+        status_code = 200
+        def aiter_lines(self):
+            return fake_aiter_lines()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+
+    class _FakeClient:
+        def stream(self, method, url, json=None, **kwargs):
+            captured.update(json or {})
+            return _FakeResponse()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+
+    monkeypatch.setattr("backend.services.llm.httpx.AsyncClient", lambda **_: _FakeClient())
+
+    tokens = [t async for t in stream_chat([{"role": "user", "content": "안녕"}])]
+
+    assert captured.get("think") is False, "think:false 누락 → qwen3 시리즈 400 에러 원인"
+    assert captured.get("stream") is True
+    assert "model" in captured
+    assert "messages" in captured
+    # keep_alive는 정수여야 함 — 문자열 "-1"은 Ollama가 time.ParseDuration 오류 반환
+    assert isinstance(captured.get("keep_alive"), int), "keep_alive must be int, not str"
+
+
+@pytest.mark.asyncio
+async def test_chat_uses_settings_model(monkeypatch):
+    """POST /settings/llm/select 후 /chat이 변경된 모델을 사용해야 한다."""
+    import json as _json
+    from backend.services import settings_service
+
+    captured: dict = {}
+
+    async def fake_aiter_lines():
+        yield _json.dumps({"message": {"content": "응"}, "done": False})
+        yield _json.dumps({"message": {"content": ""}, "done": True})
+
+    class _FakeResponse:
+        status_code = 200
+        def aiter_lines(self):
+            return fake_aiter_lines()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+
+    class _FakeClient:
+        def stream(self, method, url, json=None, **kwargs):
+            captured.update(json or {})
+            return _FakeResponse()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+
+    monkeypatch.setattr("backend.services.llm.httpx.AsyncClient", lambda **_: _FakeClient())
+    monkeypatch.setattr(settings_service, "_current_chat_model", "qwen3:4b")
+
+    from backend.services.llm import stream_chat
+    _ = [t async for t in stream_chat([{"role": "user", "content": "안녕"}])]
+
+    assert captured.get("model") == "qwen3:4b"
+
+
+# ---------------------------------------------------------------------------
 # /mood
 # ---------------------------------------------------------------------------
 

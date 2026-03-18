@@ -196,6 +196,46 @@ async def test_mood_trigger_from_message(client):
     assert done_data["mood"] == "CONCERNED"
 
 
+# ── /mood/stream 헤더 테스트 ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mood_stream_headers():
+    """/mood/stream 응답에 SSE 필수 헤더가 포함돼야 한다."""
+    from backend.routers.mood import mood_stream
+
+    resp = await mood_stream()
+
+    assert resp.media_type == "text/event-stream"
+    assert resp.headers.get("cache-control") == "no-cache"
+    assert resp.headers.get("x-accel-buffering") == "no"
+
+    # 정리
+    await resp.body_iterator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_mood_stream_event_shape():
+    """mood_change 이벤트가 AGENTS.md 9-1 계약 형식과 일치해야 한다."""
+    import backend.services.mood as mood_mod
+    from backend.routers.mood import mood_stream
+
+    mood_mod._current_mood = "HAPPY"
+
+    resp = await mood_stream()
+    gen = resp.body_iterator
+
+    chunk = await gen.__anext__()
+    assert chunk.startswith("data:")
+    event = json.loads(chunk[len("data:"):].strip())
+
+    assert event["type"] == "mood_change"
+    assert event["mood"] == "HAPPY"
+    assert "updated_at" in event
+
+    await gen.aclose()
+
+
 # ── /settings/models 테스트 ──────────────────────────────────
 
 
