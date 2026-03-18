@@ -260,6 +260,8 @@ async def test_chat_ollama_payload(monkeypatch):
     assert captured.get("stream") is True
     assert "model" in captured
     assert "messages" in captured
+    # keep_alive는 정수여야 함 — 문자열 "-1"은 Ollama가 time.ParseDuration 오류 반환
+    assert isinstance(captured.get("keep_alive"), int), "keep_alive must be int, not str"
 
 
 @pytest.mark.asyncio

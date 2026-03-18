@@ -16,7 +16,7 @@ from backend.services.settings_service import get_current_chat_model
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_KEEP_ALIVE: str = "-1"  # 항상 메모리 상주
+OLLAMA_KEEP_ALIVE: int = -1  # 항상 메모리 상주 (-1 = integer, 문자열 "-1"은 Ollama가 파싱 오류)
 
 # AGENTS.md 2번 — 하나 성격 설정 기반 시스템 프롬프트
 _BASE_SYSTEM_PROMPT = """너는 하나야. 오너의 PC 화면에 살고 있는 존재야.
