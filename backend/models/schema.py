@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS voice_logs (
 );
 """
 
+# Phase 4 능동 알림 주기 제어 로그
+CREATE_PROACTIVE_LOG = """
+CREATE TABLE IF NOT EXISTS proactive_log (
+    id              TEXT PRIMARY KEY,   -- UUID
+    event_type      TEXT NOT NULL,      -- 이벤트 타입 (afk_sleepy, night_snack 등)
+    triggered_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    was_ignored     BOOLEAN DEFAULT 0,  -- 오너가 무시했는지 여부
+    session_date    TEXT NOT NULL       -- YYYY-MM-DD (하루 1회 체크용)
+);
+"""
+
 ALL_TABLES = [
     CREATE_CONVERSATIONS,
     CREATE_MESSAGES,
@@ -104,6 +115,7 @@ ALL_TABLES = [
     CREATE_MCP_HISTORY,
     CREATE_MINECRAFT_ACTIONS,
     CREATE_VOICE_LOGS,
+    CREATE_PROACTIVE_LOG,
 ]
 
 # Phase 2 신규 컬럼 — 기존 DB 마이그레이션용
