@@ -12,7 +12,8 @@ jest.mock("electron", () => ({
     unregisterAll: jest.fn()
   },
   ipcMain: {
-    handle: jest.fn()
+    handle: jest.fn(),
+    on: jest.fn()
   },
   Menu: {
     buildFromTemplate: jest.fn()

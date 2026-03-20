@@ -1,5 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
-import SpeechBubble from "../components/SpeechBubble";
+import SpeechBubble, {
+  BUBBLE_TYPES
+} from "../components/bubble/SpeechBubble";
 
 describe("SpeechBubble", () => {
   beforeEach(() => {
@@ -8,25 +10,39 @@ describe("SpeechBubble", () => {
 
   afterEach(() => {
     jest.useRealTimers();
+    jest.clearAllMocks();
   });
 
   test("uses the correct color for the current mood", () => {
-    render(
-      <SpeechBubble message="hello" mood="HAPPY" visible />
-    );
+    render(<SpeechBubble message="hello" mood="HAPPY" visible />);
 
     expect(screen.getByTestId("speech-bubble")).toHaveStyle({
-      backgroundColor: "#f5c842"
+      backgroundColor: "#f5a623"
     });
   });
 
-  test("auto-hides after 4 seconds", () => {
+  test("falls back to alert style when capture bubble has no image", () => {
+    render(
+      <SpeechBubble
+        message="watch out"
+        mood="CONCERNED"
+        type={BUBBLE_TYPES.CAPTURE}
+        visible
+      />
+    );
+
+    expect(screen.getByTestId("speech-bubble")).toHaveClass(
+      "speech-bubble--alert"
+    );
+  });
+
+  test("auto-hides after 4 seconds via IPC", () => {
     render(<SpeechBubble message="hello" mood="IDLE" visible />);
-    expect(screen.getByTestId("speech-bubble")).toBeInTheDocument();
 
     act(() => {
       jest.advanceTimersByTime(4000);
     });
-    expect(screen.queryByTestId("speech-bubble")).not.toBeInTheDocument();
+
+    expect(window.hanaDesktop.hideBubble).toHaveBeenCalled();
   });
 });

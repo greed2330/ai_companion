@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import CharacterOverlay from "./components/CharacterOverlay";
 import ChatOverlay from "./components/ChatOverlay";
 import Settings from "./components/Settings";
+import BubbleWindow from "./components/bubble/BubbleWindow";
 import useMoodStream from "./hooks/useMoodStream";
 import { fetchModels } from "./services/settings";
 
@@ -10,7 +11,6 @@ function CharacterScreen() {
   const [mood, setMood] = useState("IDLE");
   const [models, setModels] = useState([]);
   const [currentModelId, setCurrentModelId] = useState(null);
-  const [speech, setSpeech] = useState({ message: "", visible: false });
 
   useEffect(() => {
     async function loadModels() {
@@ -35,13 +35,6 @@ function CharacterScreen() {
   useEffect(() => {
     const channel = new BroadcastChannel("hana-overlay");
     channel.onmessage = (event) => {
-      if (event.data?.type === "bubble") {
-        setSpeech({ message: event.data.message || "", visible: true });
-        if (event.data.mood) {
-          setMood(event.data.mood);
-        }
-      }
-
       if (event.data?.type === "character_model_selected") {
         setCurrentModelId(event.data.modelId || null);
       }
@@ -58,8 +51,6 @@ function CharacterScreen() {
       mood={mood}
       modelPath={activeModel?.path || ""}
       modelName={activeModel?.name || "하나"}
-      speechMessage={speech.message}
-      speechVisible={speech.visible}
     />
   );
 }
@@ -73,13 +64,11 @@ function ChatScreen() {
   });
 
   function handleAssistantReply(message, replyMood) {
-    const channel = new BroadcastChannel("hana-overlay");
-    channel.postMessage({
-      type: "bubble",
+    window.hanaDesktop?.showBubble?.({
       message,
-      mood: replyMood
+      mood: replyMood,
+      type: "talk"
     });
-    channel.close();
   }
 
   return (
@@ -95,10 +84,15 @@ function SettingsScreen() {
   return <Settings />;
 }
 
+function BubbleScreen() {
+  return <BubbleWindow />;
+}
+
 function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/character" replace />} />
+      <Route path="/bubble" element={<BubbleScreen />} />
       <Route path="/character" element={<CharacterScreen />} />
       <Route path="/chat" element={<ChatScreen />} />
       <Route path="/settings" element={<SettingsScreen />} />

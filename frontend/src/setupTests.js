@@ -27,3 +27,24 @@ if (!global.BroadcastChannel) {
 }
 
 window.__VITE_API_BASE_URL__ = "http://test";
+window.hanaDesktop = {
+  closeWindow: jest.fn(),
+  finishCharacterDrag: jest.fn(() => Promise.resolve()),
+  getCharacterBounds: jest.fn(() =>
+    Promise.resolve({ x: 100, y: 100, width: 300, height: 400 })
+  ),
+  getCharacterState: jest.fn(() => Promise.resolve({ pinned: false })),
+  hideBubble: jest.fn(),
+  minimizeWindow: jest.fn(),
+  moveCharacterBy: jest.fn(() => Promise.resolve()),
+  notifyCharacterMouse: jest.fn(),
+  onBubbleData: jest.fn(() => () => {}),
+  onBubbleTail: jest.fn(() => () => {}),
+  quitApp: jest.fn(),
+  resolveAssetUrl: jest.fn(() => Promise.resolve("asset://mock")),
+  showBubble: jest.fn(),
+  showChatWindow: jest.fn(() => Promise.resolve()),
+  showSettingsWindow: jest.fn(() => Promise.resolve()),
+  toggleCharacterPinned: jest.fn(() => Promise.resolve({ pinned: true })),
+  toggleMaximizeWindow: jest.fn()
+};

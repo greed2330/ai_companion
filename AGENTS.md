@@ -1642,11 +1642,11 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Codex만 수정합니다.
 
 ```
-현재 작업 브랜치: codex/phase3-settings
-현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 3 프런트엔드 마감 — PMX 대응 settings 반영, 메인 채팅 모델 선택 UI 구현, README 갱신
+현재 작업 브랜치: codex/phase3-ux-a
+현재 작업 중인 파일: AGENTS.md, frontend/electron/main.js, frontend/electron/preload.js, frontend/src/App.jsx, frontend/src/components/CharacterOverlay.jsx, frontend/src/components/bubble/, frontend/src/components/character/, frontend/src/services/proactive.js, frontend/src/services/reactions.js, frontend/src/styles/app.css, frontend/src/__tests__/
+마지막 완료: Phase 3-A bubbleWindow 분리, 캐릭터 상호작용(우클릭 드래그/중클릭 팬/Ctrl+휠 줌/클릭 존/쓰다듬기), 버블 타입/꼬리/온보딩 추가
 블로커: 없음
-다음 작업: dev 기준 PR 준비 및 오너 최종 검증
+다음 작업: Electron 수동 검증 후 dev PR. bubbleWindow done. IPC: show-bubble {message,mood,type,captureImage?} / hide-bubble. Character interactions done. 05-B ready.
 ```
 
 **완료된 태스크:**

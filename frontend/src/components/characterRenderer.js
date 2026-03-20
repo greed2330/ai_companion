@@ -5,7 +5,8 @@ const MOOD_PARAMS = {
     CONCERNED: { ParamEyeOpen: 1.0, ParamMouthOpenY: 0.2, ParamBodyAngleX: -3 },
     FOCUSED: { ParamEyeOpen: 1.0, ParamMouthOpenY: 0, ParamBodyAngleX: 0 },
     CURIOUS: { ParamEyeOpen: 1.2, ParamMouthOpenY: 0.1, ParamBodyAngleX: 10 },
-    GAMING: { ParamEyeOpen: 1.2, ParamMouthOpenY: 0.5, ParamBodyAngleX: 8 }
+    GAMING: { ParamEyeOpen: 1.2, ParamMouthOpenY: 0.5, ParamBodyAngleX: 8 },
+    SLEEPY: { ParamEyeOpen: 0.45, ParamMouthOpenY: 0.05, ParamBodyAngleX: -4 }
   },
   pmx: {
     IDLE: { morphs: [] },
@@ -23,7 +24,8 @@ const MOOD_PARAMS = {
         { name: "\u7b11\u3044", weight: 0.6 },
         { name: "\u3042", weight: 0.5 }
       ]
-    }
+    },
+    SLEEPY: { morphs: [{ name: "\u56f0\u308b", weight: 0.35 }] }
   }
 };
 
@@ -290,5 +292,26 @@ export function applyMood(instance, mood) {
 
   if (instance.type === "pmx") {
     applyPmxMood(instance.model, mood);
+  }
+}
+
+export function applyGaze(instance, x, y) {
+  if (!instance) {
+    return;
+  }
+
+  if (instance.type === "live2d") {
+    const coreModel = instance.model?.internalModel?.coreModel;
+    if (!coreModel) {
+      return;
+    }
+
+    coreModel.setParameterValueById("ParamEyeBallX", x);
+    coreModel.setParameterValueById("ParamEyeBallY", -y);
+  }
+
+  if (instance.type === "pmx") {
+    instance.model.rotation.x = y * 0.3;
+    instance.model.rotation.y = x * 0.3;
   }
 }

@@ -13,17 +13,55 @@ const {
 } = require("electron");
 
 const WINDOW_ROUTES = {
+  bubble: "bubble",
   character: "character",
   chat: "chat",
   settings: "settings"
 };
 
+const BUBBLE_SIZE = { width: 220, height: 90 };
+const SNAP = 40;
+
 let characterWindow = null;
+let bubbleWindow = null;
 let chatWindow = null;
 let settingsWindow = null;
 let tray = null;
 let ipcRegistered = false;
 let shortcutsRegistered = false;
+let uiState = {
+  characterPinned: false,
+  onboardingDone: false
+};
+
+function getUiStatePath() {
+  const baseDir =
+    typeof app.getPath === "function"
+      ? app.getPath("userData")
+      : path.join(process.cwd(), ".tmp");
+  return path.join(baseDir, "hana-ui-state.json");
+}
+
+function loadUiState() {
+  try {
+    uiState = {
+      ...uiState,
+      ...JSON.parse(fs.readFileSync(getUiStatePath(), "utf8"))
+    };
+  } catch {
+    uiState = { ...uiState };
+  }
+}
+
+function saveUiState() {
+  try {
+    const statePath = getUiStatePath();
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify(uiState, null, 2));
+  } catch {
+    return;
+  }
+}
 
 function getRendererEntry(route) {
   if (!app.isPackaged) {
@@ -64,12 +102,23 @@ function toggleWindowVisibility(targetWindow) {
   return true;
 }
 
+function showWindow(targetWindow) {
+  if (!targetWindow) {
+    return false;
+  }
+
+  targetWindow.show();
+  if (targetWindow.focus) {
+    targetWindow.focus();
+  }
+  return true;
+}
+
 function createAppWindow(route, options) {
   const windowInstance = new BrowserWindow({
     transparent: true,
     frame: false,
     alwaysOnTop: true,
-    skipTaskbar: false,
     backgroundColor: "#00000000",
     webPreferences: {
       contextIsolation: true,
@@ -88,6 +137,82 @@ function createAppWindow(route, options) {
   return windowInstance;
 }
 
+function snapToEdge(x, y, winW, winH, sw, sh) {
+  return {
+    x: x < SNAP ? 0 : x + winW > sw - SNAP ? sw - winW : x,
+    y: y < SNAP ? 0 : y + winH > sh - SNAP ? sh - winH : y
+  };
+}
+
+function calcBubblePosition(charBounds, bubbleSize, screenSize) {
+  const { x, y, width, height } = charBounds;
+  const { width: bw, height: bh } = bubbleSize;
+  const { width: sw, height: sh } = screenSize;
+  const position =
+    y >= bh + 20
+      ? { x: x + width / 2 - bw / 2, y: y - bh - 16, tail: "bottom" }
+      : sh - (y + height) >= bh + 20
+        ? { x: x + width / 2 - bw / 2, y: y + height + 16, tail: "top" }
+        : x >= bw + 20
+          ? { x: x - bw - 16, y: y + height / 2 - bh / 2, tail: "right" }
+          : { x: x + width + 16, y: y + height / 2 - bh / 2, tail: "left" };
+
+  position.x = Math.max(0, Math.min(sw - bw, position.x));
+  position.y = Math.max(0, Math.min(sh - bh, position.y));
+  return position;
+}
+
+function getCharacterDisplay() {
+  if (!characterWindow) {
+    return screen.getPrimaryDisplay();
+  }
+
+  return screen.getDisplayMatching(characterWindow.getBounds());
+}
+
+function syncBubblePosition(force = false) {
+  if ((!bubbleWindow?.isVisible() && !force) || !characterWindow) {
+    return null;
+  }
+
+  const display = getCharacterDisplay();
+  const position = calcBubblePosition(
+    characterWindow.getBounds(),
+    BUBBLE_SIZE,
+    display.workAreaSize
+  );
+
+  bubbleWindow.setBounds({
+    x: Math.round(position.x),
+    y: Math.round(position.y),
+    width: BUBBLE_SIZE.width,
+    height: BUBBLE_SIZE.height
+  });
+  bubbleWindow.webContents.send("bubble-tail", position.tail);
+  return position;
+}
+
+function showBubble(payload) {
+  if (!bubbleWindow || !characterWindow) {
+    return null;
+  }
+
+  const position = syncBubblePosition(true);
+  bubbleWindow.webContents.send("bubble-data", {
+    captureImage: payload.captureImage || "",
+    message: payload.message || "",
+    mood: payload.mood || "IDLE",
+    tail: position?.tail || "bottom",
+    type: payload.type || "talk"
+  });
+  if (typeof bubbleWindow.showInactive === "function") {
+    bubbleWindow.showInactive();
+  } else {
+    bubbleWindow.show();
+  }
+  return position;
+}
+
 function createCharacterWindow() {
   const display = screen.getPrimaryDisplay();
   const width = 300;
@@ -99,11 +224,27 @@ function createCharacterWindow() {
     x: display.workArea.x + display.workArea.width - width - 24,
     y: display.workArea.y + display.workArea.height - height - 24,
     focusable: false,
-    resizable: false,
     hasShadow: false,
+    resizable: false,
     skipTaskbar: true
   });
   characterWindow.setIgnoreMouseEvents(true, { forward: true });
+  characterWindow.on("move", () => {
+    syncBubblePosition();
+  });
+}
+
+function createBubbleWindow() {
+  bubbleWindow = createAppWindow(WINDOW_ROUTES.bubble, {
+    width: BUBBLE_SIZE.width,
+    height: BUBBLE_SIZE.height,
+    focusable: false,
+    hasShadow: false,
+    resizable: false,
+    show: false,
+    skipTaskbar: true
+  });
+  bubbleWindow.setIgnoreMouseEvents(true, { forward: true });
 }
 
 function createChatWindow() {
@@ -119,8 +260,8 @@ function createChatWindow() {
     x: display.workArea.x + display.workArea.width - width - 44,
     y: display.workArea.y + display.workArea.height - height - 60,
     focusable: true,
-    show: false,
     resizable: true,
+    show: false,
     skipTaskbar: false
   });
 }
@@ -138,8 +279,8 @@ function createSettingsWindow() {
     x: display.workArea.x + display.workArea.width - width - 64,
     y: display.workArea.y + 64,
     focusable: true,
-    show: false,
     resizable: true,
+    show: false,
     skipTaskbar: false
   });
 }
@@ -156,11 +297,11 @@ function createTray() {
     Menu.buildFromTemplate([
       {
         label: "Show Chat",
-        click: () => toggleWindowVisibility(chatWindow)
+        click: () => showWindow(chatWindow)
       },
       {
         label: "Settings",
-        click: () => toggleWindowVisibility(settingsWindow)
+        click: () => showWindow(settingsWindow)
       },
       { type: "separator" },
       {
@@ -180,6 +321,46 @@ function registerShortcuts() {
     toggleWindowVisibility(chatWindow);
   });
   shortcutsRegistered = true;
+}
+
+function moveCharacterWindowBy(deltaX, deltaY) {
+  if (!characterWindow || uiState.characterPinned) {
+    return characterWindow?.getBounds() || null;
+  }
+
+  const bounds = characterWindow.getBounds();
+  const display = getCharacterDisplay();
+  const next = snapToEdge(
+    bounds.x + deltaX,
+    bounds.y + deltaY,
+    bounds.width,
+    bounds.height,
+    display.workAreaSize.width,
+    display.workAreaSize.height
+  );
+
+  characterWindow.setPosition(Math.round(next.x), Math.round(next.y));
+  return { ...bounds, ...next };
+}
+
+function finishCharacterDrag() {
+  if (!characterWindow) {
+    return null;
+  }
+
+  const bounds = characterWindow.getBounds();
+  const display = getCharacterDisplay();
+  const next = snapToEdge(
+    bounds.x,
+    bounds.y,
+    bounds.width,
+    bounds.height,
+    display.workAreaSize.width,
+    display.workAreaSize.height
+  );
+
+  characterWindow.setPosition(Math.round(next.x), Math.round(next.y));
+  return { ...bounds, ...next };
 }
 
 function registerIpcHandlers() {
@@ -210,16 +391,63 @@ function registerIpcHandlers() {
   ipcMain.handle("window:close", (event) => {
     BrowserWindow.fromWebContents(event.sender)?.hide();
   });
+  ipcMain.handle("window:show-chat", () => showWindow(chatWindow));
+  ipcMain.handle("window:show-settings", () => showWindow(settingsWindow));
+  ipcMain.handle("app:quit", () => app.quit());
+  ipcMain.handle("character:get-bounds", () => characterWindow?.getBounds() || null);
+  ipcMain.handle("character:get-state", () => ({
+    pinned: uiState.characterPinned
+  }));
+  ipcMain.handle("character:move-by", (_event, deltaX, deltaY) =>
+    moveCharacterWindowBy(deltaX, deltaY)
+  );
+  ipcMain.handle("character:finish-drag", () => finishCharacterDrag());
+  ipcMain.handle("character:toggle-pin", () => {
+    uiState.characterPinned = !uiState.characterPinned;
+    saveUiState();
+    return { pinned: uiState.characterPinned };
+  });
+  ipcMain.on("char-mouse-enter", () => {
+    characterWindow?.setIgnoreMouseEvents(false);
+  });
+  ipcMain.on("char-mouse-leave", () => {
+    characterWindow?.setIgnoreMouseEvents(true, { forward: true });
+  });
+  ipcMain.on("show-bubble", (_event, payload) => {
+    showBubble(payload);
+  });
+  ipcMain.on("hide-bubble", () => {
+    bubbleWindow?.hide();
+  });
   ipcRegistered = true;
 }
 
+function maybeShowOnboardingBubble() {
+  if (uiState.onboardingDone) {
+    return;
+  }
+
+  setTimeout(() => {
+    showBubble({
+      message: "안녕! 나 하나야~ 우클릭해봐!",
+      mood: "HAPPY",
+      type: "talk"
+    });
+  }, 500);
+  uiState.onboardingDone = true;
+  saveUiState();
+}
+
 function createWindows() {
+  loadUiState();
   createCharacterWindow();
+  createBubbleWindow();
   createChatWindow();
   createSettingsWindow();
   createTray();
   registerShortcuts();
   registerIpcHandlers();
+  maybeShowOnboardingBubble();
 }
 
 if (process.env.NODE_ENV !== "test") {
@@ -246,7 +474,10 @@ if (process.env.NODE_ENV !== "test") {
 
 module.exports = {
   WINDOW_ROUTES,
+  calcBubblePosition,
   createWindows,
   resolveAssetUrl,
+  showBubble,
+  snapToEdge,
   toggleWindowVisibility
 };
