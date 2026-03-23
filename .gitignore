@@ -104,3 +104,4 @@ temp/
 
 # ── Whisper 캐시 ─────────────────────────────
 ~/.cache/whisper/
+assets/live2d/live2dcubismcore.min.js
