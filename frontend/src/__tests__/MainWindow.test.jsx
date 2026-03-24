@@ -3,6 +3,45 @@ import MainWindow from "../pages/MainWindow";
 
 jest.mock("../hooks/useMoodStream", () => jest.fn());
 jest.mock("../hooks/useAfkDetection", () => jest.fn());
+jest.mock("../hooks/useSettings", () =>
+  jest.fn(() => ({
+    effective: {
+      persona: { ai_name: "하나" },
+      voice: { inputMode: "text", outputMode: "chat" },
+      autonomous: {
+        background_search: false,
+        crawl_learning: false,
+        proactive_chat: false,
+        screen_reaction: true,
+        terminal_access: false,
+        document_link: false,
+        search_limit: 10
+      },
+      integrations: {
+        serper: { status: "grey", apiKey: "" },
+        google_calendar: { status: "grey", apiKey: "" },
+        github: { status: "grey", apiKey: "" }
+      },
+      character: { modelId: "furina", modelType: "PMX", viewportScale: 100 },
+      aiModel: { chatModelId: "qwen3:14b", status: "연결됨" },
+      app: { theme: "dark-anime", shortcut: "Alt+H", autoLaunch: false }
+    },
+    error: "",
+    handleCancel: jest.fn(),
+    handleConfirm: jest.fn(),
+    handleReset: jest.fn(),
+    handleThemeChange: jest.fn(),
+    meta: {
+      characterModels: [],
+      llmModels: [],
+      previewSamples: [],
+      integrationState: {}
+    },
+    setError: jest.fn(),
+    setMeta: jest.fn(),
+    updatePending: jest.fn()
+  }))
+);
 
 const useMoodStream = jest.requireMock("../hooks/useMoodStream");
 

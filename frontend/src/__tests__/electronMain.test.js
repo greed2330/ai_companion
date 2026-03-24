@@ -73,6 +73,7 @@ jest.mock("electron", () => {
       isPackaged: false,
       on: jest.fn(),
       quit: jest.fn(),
+      setLoginItemSettings: jest.fn(),
       whenReady: jest.fn(() => Promise.resolve()),
       getAppPath: jest.fn(() => "E:/Projects/hana_project/hana_codex")
     },
@@ -191,6 +192,20 @@ describe("electron main windows", () => {
     unifiedWindow.isVisible.mockReturnValue(true);
     shortcutHandler();
     expect(unifiedWindow.hide).toHaveBeenCalled();
+  });
+
+  test("saved shortcut is applied after restart", () => {
+    storeState.appSettings = {
+      app: { shortcut: "Ctrl+Shift+H", theme: "dark-anime", autoLaunch: false }
+    };
+    const electron = require("electron");
+    const main = require("../../electron/main");
+
+    main.createWindows();
+    expect(electron.globalShortcut.register).toHaveBeenCalledWith(
+      "Ctrl+Shift+H",
+      expect.any(Function)
+    );
   });
 
   test("bubble position above character uses bottom tail", () => {

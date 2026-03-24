@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
-import { submitFeedback } from "../services/feedback";
 import { streamChat } from "../services/chat";
+import { submitFeedback } from "../services/feedback";
+import { OUTPUT_MODES } from "../constants/outputModes";
+import { useOutputMode } from "../hooks/useOutputMode";
 
 const ROOM_CONFIG = {
-  general: { label: "일반 대화", icon: "🗨", interactionType: "chat" },
+  general: { label: "일반 대화", icon: "🗨", interactionType: "general" },
   coding: { label: "코딩", icon: "💻", interactionType: "coding" },
   game: { label: "게임", icon: "🎮", interactionType: "game" },
-  free: { label: "자유", icon: "", interactionType: null }
+  free: { label: "자유", icon: "", interactionType: "free" }
 };
 
 function ChatWindow({
@@ -29,6 +31,7 @@ function ChatWindow({
   const [feedbackState, setFeedbackState] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const endRef = useRef(null);
+  const { handleResponse } = useOutputMode(settings);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -54,17 +57,27 @@ function ChatWindow({
     }
 
     const assistantId = `assistant-${Date.now()}`;
+    const outputMode = settings.outputMode || OUTPUT_MODES.CHAT;
+    const shouldRenderInChat = outputMode === OUTPUT_MODES.CHAT;
+    const voiceMode =
+      settings.inputMode === "voice" || settings.inputMode === "both";
     let assistantContent = "";
-    const voiceMode = settings.inputMode === "voice";
 
     setError("");
     setInput("");
     setIsStreaming(true);
-    setMessages((prev) => [
-      ...prev,
-      { id: `user-${Date.now()}`, role: "user", content: trimmed },
-      { id: assistantId, role: "assistant", content: "", mood: "IDLE" }
-    ]);
+    setMessages((prev) => {
+      const next = [
+        ...prev,
+        { id: `user-${Date.now()}`, role: "user", content: trimmed }
+      ];
+
+      if (shouldRenderInChat) {
+        next.push({ id: assistantId, role: "assistant", content: "", mood: "IDLE" });
+      }
+
+      return next;
+    });
 
     try {
       await streamChat({
@@ -74,6 +87,11 @@ function ChatWindow({
         voiceMode,
         onToken: (token) => {
           assistantContent += token;
+
+          if (!shouldRenderInChat) {
+            return;
+          }
+
           setMessages((prev) =>
             prev.map((message) =>
               message.id === assistantId
@@ -82,29 +100,43 @@ function ChatWindow({
             )
           );
         },
-        onDone: (event) => {
+        onDone: async (event) => {
           const nextMood = event.mood || "IDLE";
           setConversationId(event.conversation_id || conversationId);
           onMoodChange(nextMood);
-          setMessages((prev) =>
-            prev.map((message) =>
-              message.id === assistantId
-                ? {
-                    ...message,
-                    id: event.message_id || message.id,
+
+          if (shouldRenderInChat) {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      id: event.message_id || message.id,
+                      mood: nextMood
+                    }
+                  : message
+              )
+            );
+          }
+
+          await handleResponse(
+            assistantContent,
+            event.action_type || "",
+            window.__pendingTTSParams || {},
+            (text) => {
+              if (!shouldRenderInChat) {
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: event.message_id || assistantId,
+                    role: "assistant",
+                    content: text,
                     mood: nextMood
                   }
-                : message
-            )
+                ]);
+              }
+            }
           );
-
-          if (voiceMode) {
-            window.hanaDesktop?.showBubble?.({
-              message: assistantContent.slice(0, 30),
-              mood: nextMood,
-              type: "talk"
-            });
-          }
         },
         onRoomChange: onRoomEvent
       });
@@ -254,7 +286,8 @@ ChatWindow.propTypes = {
   onRoomChange: PropTypes.func.isRequired,
   onRoomEvent: PropTypes.func.isRequired,
   settings: PropTypes.shape({
-    inputMode: PropTypes.string.isRequired
+    inputMode: PropTypes.string.isRequired,
+    outputMode: PropTypes.string
   }).isRequired
 };
 

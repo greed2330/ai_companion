@@ -3,6 +3,7 @@ import ChatWindow from "../components/ChatWindow";
 import Settings from "../components/Settings";
 import useAfkDetection from "../hooks/useAfkDetection";
 import useMoodStream from "../hooks/useMoodStream";
+import useSettings from "../hooks/useSettings";
 
 const TABS = [
   { id: "chat", label: "채팅" },
@@ -15,7 +16,7 @@ function MainWindow() {
   const [currentRoom, setCurrentRoom] = useState("general");
   const [autoRoom, setAutoRoom] = useState(true);
   const [conversationSeed, setConversationSeed] = useState(0);
-  const [settings] = useState({ inputMode: "text" });
+  const settingsState = useSettings();
 
   function handleRoomChangeEvent(event) {
     if (autoRoom && event?.room_type) {
@@ -50,7 +51,7 @@ function MainWindow() {
   return (
     <section className="main-window" data-testid="main-window">
       <header className="main-window__header">
-        <strong>하나</strong>
+        <strong>{settingsState.effective.persona.ai_name || "하나"}</strong>
         <div className="window-controls">
           <button
             type="button"
@@ -100,10 +101,10 @@ function MainWindow() {
             }}
             onRoomChange={setCurrentRoom}
             onRoomEvent={handleRoomChangeEvent}
-            settings={settings}
+            settings={settingsState.effective.voice}
           />
         ) : (
-          <Settings />
+          <Settings settingsState={settingsState} />
         )}
       </div>
     </section>

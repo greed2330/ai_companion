@@ -34,6 +34,17 @@ window.__VITE_API_BASE_URL__ = "http://test";
 window.hanaDesktop = {
   closeWindow: jest.fn(),
   finishCharacterDrag: jest.fn(() => Promise.resolve()),
+  getAppSettings: jest.fn(() =>
+    Promise.resolve({
+      app: { theme: "dark-anime", shortcut: "Alt+H", autoLaunch: false },
+      integrations: {
+        serper: { status: "grey", apiKey: "" },
+        google_calendar: { status: "grey", apiKey: "" },
+        github: { status: "grey", apiKey: "" }
+      },
+      voice: { inputMode: "text", outputMode: "chat", ttsEnabled: false }
+    })
+  ),
   getCharacterBounds: jest.fn(() =>
     Promise.resolve({ x: 100, y: 100, width: 300, height: 400 })
   ),
@@ -41,12 +52,14 @@ window.hanaDesktop = {
   hideBubble: jest.fn(),
   minimizeWindow: jest.fn(),
   moveCharacterBy: jest.fn(() => Promise.resolve()),
+  notifyAiNameChanged: jest.fn(),
   notifyCharacterMouse: jest.fn(),
   onBubbleData: jest.fn(() => () => {}),
   onBubbleTail: jest.fn(() => () => {}),
   onSetTab: jest.fn(() => () => {}),
   quitApp: jest.fn(),
   resolveAssetUrl: jest.fn(() => Promise.resolve("asset://mock")),
+  saveAppSettings: jest.fn((payload) => Promise.resolve(payload)),
   showBubble: jest.fn(),
   showMainChatWindow: jest.fn(),
   showMainSettingsWindow: jest.fn(),

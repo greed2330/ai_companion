@@ -7,41 +7,14 @@ function createListener(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld("hanaDesktop", {
-  resolveAssetUrl(relativePath) {
-    return ipcRenderer.invoke("assets:resolve-url", relativePath);
-  },
-  minimizeWindow() {
-    return ipcRenderer.invoke("window:minimize");
-  },
-  toggleMaximizeWindow() {
-    return ipcRenderer.invoke("window:maximize-toggle");
-  },
   closeWindow() {
     return ipcRenderer.invoke("window:close");
   },
-  onSetTab(callback) {
-    return createListener("set-tab", callback);
-  },
-  showBubble(payload) {
-    ipcRenderer.send("show-bubble", payload);
-  },
-  hideBubble() {
-    ipcRenderer.send("hide-bubble");
-  },
-  onBubbleData(callback) {
-    return createListener("bubble-data", callback);
-  },
-  onBubbleTail(callback) {
-    return createListener("bubble-tail", callback);
-  },
-  notifyCharacterMouse(isInside) {
-    ipcRenderer.send(isInside ? "char-mouse-enter" : "char-mouse-leave");
-  },
-  moveCharacterBy(deltaX, deltaY) {
-    return ipcRenderer.invoke("character:move-by", deltaX, deltaY);
-  },
   finishCharacterDrag() {
     return ipcRenderer.invoke("character:finish-drag");
+  },
+  getAppSettings() {
+    return ipcRenderer.invoke("app-settings:get");
   },
   getCharacterBounds() {
     return ipcRenderer.invoke("character:get-bounds");
@@ -49,8 +22,41 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   getCharacterState() {
     return ipcRenderer.invoke("character:get-state");
   },
-  toggleCharacterPinned() {
-    return ipcRenderer.invoke("character:toggle-pin");
+  hideBubble() {
+    ipcRenderer.send("hide-bubble");
+  },
+  minimizeWindow() {
+    return ipcRenderer.invoke("window:minimize");
+  },
+  moveCharacterBy(deltaX, deltaY) {
+    return ipcRenderer.invoke("character:move-by", deltaX, deltaY);
+  },
+  notifyAiNameChanged(name) {
+    ipcRenderer.send("ai-name-changed", name);
+  },
+  notifyCharacterMouse(isInside) {
+    ipcRenderer.send(isInside ? "char-mouse-enter" : "char-mouse-leave");
+  },
+  onBubbleData(callback) {
+    return createListener("bubble-data", callback);
+  },
+  onBubbleTail(callback) {
+    return createListener("bubble-tail", callback);
+  },
+  onSetTab(callback) {
+    return createListener("set-tab", callback);
+  },
+  quitApp() {
+    return ipcRenderer.invoke("app:quit");
+  },
+  resolveAssetUrl(relativePath) {
+    return ipcRenderer.invoke("assets:resolve-url", relativePath);
+  },
+  saveAppSettings(payload) {
+    return ipcRenderer.invoke("app-settings:save", payload);
+  },
+  showBubble(payload) {
+    ipcRenderer.send("show-bubble", payload);
   },
   showChatWindow() {
     ipcRenderer.send("open-main-chat");
@@ -58,13 +64,16 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   showMainChatWindow() {
     ipcRenderer.send("open-main-chat");
   },
-  showSettingsWindow() {
-    ipcRenderer.send("open-main-settings");
-  },
   showMainSettingsWindow() {
     ipcRenderer.send("open-main-settings");
   },
-  quitApp() {
-    return ipcRenderer.invoke("app:quit");
+  showSettingsWindow() {
+    ipcRenderer.send("open-main-settings");
+  },
+  toggleCharacterPinned() {
+    return ipcRenderer.invoke("character:toggle-pin");
+  },
+  toggleMaximizeWindow() {
+    return ipcRenderer.invoke("window:maximize-toggle");
   }
 });
