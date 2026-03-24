@@ -14,6 +14,27 @@ const {
 } = require("electron");
 
 const store = new Store();
+const DEFAULT_SHORTCUT = "Alt+H";
+const DEFAULT_APP_SETTINGS = {
+  app: {
+    theme: "dark-anime",
+    shortcut: DEFAULT_SHORTCUT,
+    autoLaunch: false
+  },
+  integrations: {
+    serper: { status: "grey", apiKey: "" },
+    google_calendar: { status: "grey", apiKey: "", note: "credentials.json 필요" },
+    github: { status: "grey", apiKey: "" }
+  },
+  voice: {
+    inputMode: "text",
+    outputMode: "chat",
+    ttsEnabled: false,
+    voicePreset: "kokoro",
+    samplePath: "",
+    hotwordEnabled: false
+  }
+};
 
 const WINDOW_ROUTES = {
   bubble: "bubble",
@@ -38,6 +59,26 @@ function getRendererEntry(route) {
   }
 
   return path.join(__dirname, "../dist/index.html");
+}
+
+function getStoredAppSettings() {
+  return {
+    ...DEFAULT_APP_SETTINGS,
+    ...(store.get("appSettings") || {})
+  };
+}
+
+function saveStoredAppSettings(nextSettings) {
+  const merged = {
+    ...DEFAULT_APP_SETTINGS,
+    ...nextSettings
+  };
+  store.set("appSettings", merged);
+  return merged;
+}
+
+function updateTrayTooltip(name = "HANA") {
+  tray?.setToolTip?.(name || "HANA");
 }
 
 function resolveAssetUrl(relativePath) {
@@ -68,18 +109,6 @@ function toggleWindowVisibility(targetWindow) {
 
   targetWindow.show();
   targetWindow.focus();
-  return true;
-}
-
-function showWindow(targetWindow) {
-  if (!targetWindow) {
-    return false;
-  }
-
-  targetWindow.show();
-  if (targetWindow.focus) {
-    targetWindow.focus();
-  }
   return true;
 }
 
@@ -218,6 +247,7 @@ function showBubble(payload) {
   const position = syncBubblePosition(true);
   bubbleWindow.webContents.send("bubble-data", {
     captureImage: payload.captureImage || "",
+    duration: payload.duration || 0,
     message: payload.message || "",
     mood: payload.mood || "IDLE",
     tail: position?.tail || "bottom",
@@ -276,32 +306,25 @@ function createTray() {
     : nativeImage.createEmpty();
 
   tray = new Tray(icon);
-  tray.setToolTip("HANA");
+  updateTrayTooltip("HANA");
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      {
-        label: "채팅 열기",
-        click: () => showMainWindow("chat")
-      },
-      {
-        label: "설정 열기",
-        click: () => showMainWindow("settings")
-      },
+      { label: "채팅 열기", click: () => showMainWindow("chat") },
+      { label: "설정 열기", click: () => showMainWindow("settings") },
       { type: "separator" },
-      {
-        label: "종료",
-        click: () => app.quit()
-      }
+      { label: "종료", click: () => app.quit() }
     ])
   );
 }
 
 function registerShortcuts() {
+  const shortcut = getStoredAppSettings().app.shortcut || DEFAULT_SHORTCUT;
+
   if (shortcutsRegistered) {
-    return;
+    globalShortcut.unregisterAll();
   }
 
-  globalShortcut.register("Alt+H", () => {
+  globalShortcut.register(shortcut, () => {
     toggleWindowVisibility(mainWindow);
   });
   shortcutsRegistered = true;
@@ -352,6 +375,19 @@ function registerIpcHandlers() {
     return;
   }
 
+  ipcMain.handle("app-settings:get", () => getStoredAppSettings());
+  ipcMain.handle("app-settings:save", (_event, payload) => {
+    const saved = saveStoredAppSettings(payload);
+
+    registerShortcuts();
+    if (typeof app.setLoginItemSettings === "function") {
+      app.setLoginItemSettings({
+        openAtLogin: Boolean(saved.app?.autoLaunch)
+      });
+    }
+
+    return saved;
+  });
   ipcMain.handle("assets:resolve-url", (_event, relativePath) =>
     resolveAssetUrl(relativePath)
   );
@@ -388,6 +424,10 @@ function registerIpcHandlers() {
     const nextPinned = !store.get("characterPinned", false);
     store.set("characterPinned", nextPinned);
     return { pinned: nextPinned };
+  });
+  ipcMain.on("ai-name-changed", (_event, name) => {
+    updateTrayTooltip(name);
+    bubbleWindow?.webContents?.send("ai-name-changed", name);
   });
   ipcMain.on("open-main-chat", () => {
     showMainWindow("chat");
@@ -467,6 +507,7 @@ module.exports = {
   WINDOW_ROUTES,
   calcBubblePosition,
   createWindows,
+  getStoredAppSettings,
   resolveAssetUrl,
   showBubble,
   showMainWindow,

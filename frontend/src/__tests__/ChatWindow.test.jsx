@@ -41,7 +41,7 @@ function renderChatWindow(props = {}) {
       onNewConversation={jest.fn()}
       onRoomChange={jest.fn()}
       onRoomEvent={jest.fn()}
-      settings={{ inputMode: "text" }}
+      settings={{ inputMode: "text", outputMode: "chat" }}
       {...props}
     />
   );
@@ -67,10 +67,10 @@ describe("ChatWindow", () => {
     );
 
     renderChatWindow();
-    const input = screen.getByLabelText("message-input");
-
-    fireEvent.change(input, { target: { value: "테스트" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(screen.getByLabelText("message-input"), {
+      target: { value: "테스트" }
+    });
+    fireEvent.keyDown(screen.getByLabelText("message-input"), { key: "Enter" });
 
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "전송" })).toBeInTheDocument();
@@ -81,7 +81,6 @@ describe("ChatWindow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
     expect(screen.getByTestId("chat-sidebar")).toBeInTheDocument();
-
     fireEvent.click(screen.getByRole("button", { name: "sidebar-backdrop" }));
     expect(screen.queryByTestId("chat-sidebar")).not.toBeInTheDocument();
   });
@@ -118,30 +117,22 @@ describe("ChatWindow", () => {
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
   });
 
-  test("voice mode response shows bubble", async () => {
+  test("voice mode sends voice_mode:true", async () => {
     fetch.mockResolvedValue(
       createSseResponse([
-        'data: {"type":"token","content":"짧"}\n',
-        'data: {"type":"token","content":"게"}\n',
+        'data: {"type":"token","content":"안"}\n',
         'data: {"type":"done","message_id":"m3","conversation_id":"c3","mood":"HAPPY"}\n',
         "data: [DONE]\n"
       ])
     );
 
-    renderChatWindow({ settings: { inputMode: "voice" } });
+    renderChatWindow({ settings: { inputMode: "voice", outputMode: "chat" } });
     fireEvent.change(screen.getByLabelText("message-input"), {
       target: { value: "음성 테스트" }
     });
     fireEvent.click(screen.getByRole("button", { name: "전송" }));
 
-    await waitFor(() =>
-      expect(window.hanaDesktop.showBubble).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: "짧게",
-          mood: "HAPPY",
-          type: "talk"
-        })
-      )
-    );
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(fetch.mock.calls[0][1].body).toContain('"voice_mode":true');
   });
 });
