@@ -1,3 +1,10 @@
+jest.mock("electron-store", () =>
+  jest.fn().mockImplementation(() => ({
+    get: jest.fn(),
+    set: jest.fn()
+  }))
+);
+
 jest.mock("electron", () => ({
   app: {
     isPackaged: false,

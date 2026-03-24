@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   closeWindow() {
     return ipcRenderer.invoke("window:close");
   },
+  onSetTab(callback) {
+    return createListener("set-tab", callback);
+  },
   showBubble(payload) {
     ipcRenderer.send("show-bubble", payload);
   },
@@ -50,10 +53,16 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
     return ipcRenderer.invoke("character:toggle-pin");
   },
   showChatWindow() {
-    return ipcRenderer.invoke("window:show-chat");
+    ipcRenderer.send("open-main-chat");
+  },
+  showMainChatWindow() {
+    ipcRenderer.send("open-main-chat");
   },
   showSettingsWindow() {
-    return ipcRenderer.invoke("window:show-settings");
+    ipcRenderer.send("open-main-settings");
+  },
+  showMainSettingsWindow() {
+    ipcRenderer.send("open-main-settings");
   },
   quitApp() {
     return ipcRenderer.invoke("app:quit");

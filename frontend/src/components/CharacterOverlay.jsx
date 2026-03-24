@@ -13,14 +13,12 @@ import {
   TIPS,
   ZONE_REACTIONS
 } from "./character/interactionUtils";
-import { postProactiveIgnored } from "../services/proactive";
 import { requestReactionBubble } from "../services/reactions";
 
 function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const dragRef = useRef(null);
-  const ignoreTimerRef = useRef(null);
   const pettingTracker = useMemo(
     () =>
       createPettingTracker(() => {
@@ -92,13 +90,6 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(
-    () => () => {
-      window.clearTimeout(ignoreTimerRef.current);
-    },
-    []
-  );
-
   function closeMenu() {
     setMenuState((current) => ({ ...current, open: false }));
   }
@@ -108,7 +99,6 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
     const zone = getClickZone(event.clientY - bounds.top, bounds.height);
     const reaction = ZONE_REACTIONS[zone];
 
-    window.clearTimeout(ignoreTimerRef.current);
     try {
       const bubble = await requestReactionBubble(reaction.prompt);
       window.hanaDesktop?.showBubble?.({
@@ -123,10 +113,6 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
         type: "talk"
       });
     }
-
-    ignoreTimerRef.current = window.setTimeout(() => {
-      postProactiveIgnored();
-    }, 4000);
   }
 
   function handleMouseDown(event) {

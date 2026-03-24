@@ -138,11 +138,11 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Codex만 수정합니다.
 
 ```
-현재 작업 브랜치: codex/phase3-ux-a
-현재 작업 중인 파일: AGENTS.md, frontend/electron/main.js, frontend/electron/preload.js, frontend/src/App.jsx, frontend/src/components/CharacterOverlay.jsx, frontend/src/components/bubble/, frontend/src/components/character/, frontend/src/services/proactive.js, frontend/src/services/reactions.js, frontend/src/styles/app.css, frontend/src/__tests__/
-마지막 완료: Phase 3-A bubbleWindow 분리, 캐릭터 상호작용(우클릭 드래그/중클릭 팬/Ctrl+휠 줌/클릭 존/쓰다듬기), 버블 타입/꼬리/온보딩 추가
+현재 작업 브랜치: codex/phase3-ux-b
+현재 작업 중인 파일: 없음 (소유권 해제)
+마지막 완료: Phase 3-B unified mainWindow + sidebar + proactive reactions 완료 (2026-03-24)
 블로커: 없음
-다음 작업: Electron 수동 검증 후 dev PR. bubbleWindow done. IPC: show-bubble {message,mood,type,captureImage?} / hide-bubble. Character interactions done. 05-B ready.
+다음 작업: 05-C 설정 탭 내용 채우기
 ```
 
 **완료된 태스크:**
@@ -167,25 +167,17 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] Settings UI 확장: `/settings/llm/models` 렌더, role=chat 메인 채팅 모델만 선택 가능
 - [x] README 실행 가이드/비공개 자산 위치/AI 모델 정책 문서화
 - [x] Phase 3 마감 검증: `npm test` (13/13), `npm run build`
+- [x] Phase 3-B: chat/settings 단일 `mainWindow` 통합 + Alt+H 토글/트레이/우클릭 탭 열기
+- [x] Phase 3-B: 채팅 탭 사이드바 + 룸 선택 + `room_change` SSE 반영 + 자동/수동 룸 전환
+- [x] Phase 3-B: AFK 감지 + 시간대 기반 능동 반응 + `/proactive/check`/`/proactive/ignored` 연결
+- [x] Phase 3-B: 프론트 테스트 34/34 통과, `npm run build` 통과
 
 **Claude Code에게 전달할 브리핑:**
-- Docker 테스트 명령(`docker-compose -f docker-compose.test.yml run frontend npm test`)은 현재 compose 파싱 오류로 실패:
-  - `services.backend.environment.[0]: unexpected type map[string]interface {}`
-  - 프론트 자체 Jest 테스트는 로컬에서 통과 완료
-- mood stream fallback은 런타임에서 강제 발생시키지 않았고 Jest로만 검증함
-- `npm run electron:dev`는 권한 상승 후 실행 시작은 됐지만 GUI 장기 실행이라 Codex 셸에서 타임아웃됨. 수동 UI 확인은 오너 환경에서 최종 체크 필요
-- backend `backend/routers/settings.py` 기준 현재 모델 스캔이 Live2D 전용이라 PMX 선택 UI가 실제로 채워지지 않을 수 있음
-- 오너가 확정한 Ollama 모델 정책:
-  - 메인 채팅 모델(설정 UI에서만 교체 가능): `qwen3:14b` 기본값
-  - 소형 작업 모델(고정): `qwen3:4b`
-  - 비전 모델(고정): `qwen3-vl:8b`
-- AI 모델 선택 UX 범위:
-  - 프런트 설정 UI에서는 메인 채팅 모델만 선택/교체
-  - 소형 모델, 비전 모델은 UI에서 노출하지 않고 고정 유지
-- Codex 후속 작업은 현재 없음. Phase 3 프런트 요구사항은 계약 기준으로 마감 완료
-- 오너가 지금 당장 준비해야 하는 필수 준비물은 없음. 있으면 좋은 것만 있음:
-  - 로컬 테스트용 Live2D/PMX 모델 샘플 유지
-  - 로컬 설치 모델 유지: `qwen3:14b`, `qwen3:4b`, `qwen3-vl:8b`
+- mainWindow unified. Sidebar done. room_change SSE done. Proactive reactions done. Settings tab is empty 05-C fills it.
+- `electron-store` 추가: `mainWindowPos`, `characterPinned`, `onboardingDone`를 메인 프로세스에서 저장.
+- `/chat` 호출에 `interaction_type`, `voice_mode` 연결 완료. `room_change`는 `/chat` SSE와 `/mood/stream` 둘 다 수용하게 프론트에서 처리.
+- 자동 검증 완료: `npm test` 34/34 통과, `npm run build` 통과.
+- 수동 확인은 미실행: Alt+H, 탭 전환, 사이드바, room auto-switch, AFK, 시간 반응, position memory는 오너 환경에서 최종 확인 필요.
 
 ---
 
