@@ -16,7 +16,13 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.services.mood import push_event
-from backend.services.settings_service import get_current_chat_model, set_current_chat_model
+from backend.services.settings_service import (
+    get_current_chat_model,
+    get_persona,
+    set_current_chat_model,
+    set_persona,
+)
+from backend.services.llm import build_system_prompt, complete_chat
 
 logger = logging.getLogger(__name__)
 
@@ -196,3 +202,72 @@ async def select_llm_model(req: SelectLlmModelRequest) -> dict:
     logger.info(f"/settings/llm/select: chat model changed to {req.model_id}")
 
     return {"success": True, "current_chat_model": req.model_id}
+
+
+# ── 페르소나 엔드포인트 ───────────────────────────────────────────
+
+
+@router.get("/settings/persona")
+async def get_persona_settings() -> dict:
+    """현재 페르소나 설정을 반환한다."""
+    persona = get_persona()
+    logger.info("/settings/persona GET")
+    return persona
+
+
+class PersonaRequest(BaseModel):
+    ai_name: str = "하나"
+    owner_nickname: str = ""
+    speech_style: str = ""
+    speech_preset: str = "bright_friend"
+    personality: str = ""
+    personality_preset: str = "energetic"
+    interests: str = ""
+
+
+@router.post("/settings/persona")
+async def update_persona(req: PersonaRequest) -> dict:
+    """
+    페르소나 설정을 변경한다. data/settings.json에 저장.
+    다음 /chat 요청부터 시스템 프롬프트에 반영된다.
+    """
+    set_persona(req.model_dump())
+    logger.info(f"/settings/persona POST: ai_name={req.ai_name}")
+    return {"success": True}
+
+
+class PersonaPreviewRequest(BaseModel):
+    ai_name: str = "하나"
+    owner_nickname: str = ""
+    speech_style: str = ""
+    speech_preset: str = "bright_friend"
+    personality: str = ""
+    personality_preset: str = "energetic"
+    interests: str = ""
+
+
+@router.post("/settings/persona/preview")
+async def preview_persona(req: PersonaPreviewRequest) -> dict:
+    """
+    임시 페르소나로 LLM을 3회 호출해 말투 샘플을 반환한다.
+    저장하지 않는다. think 모드 강제 비활성화.
+    """
+    persona = req.model_dump()
+    system_prompt = build_system_prompt(mood="IDLE", persona=persona, voice_mode=False)
+    test_message = [{"role": "user", "content": "안녕! 오늘 어땠어?"}]
+
+    samples: list[str] = []
+    for _ in range(3):
+        try:
+            response = await complete_chat(
+                test_message,
+                system_prompt=system_prompt,
+                use_think=False,
+            )
+            samples.append(response.strip())
+        except Exception as e:
+            logger.error(f"/settings/persona/preview LLM error: {e}")
+            samples.append("(응답 생성 실패)")
+
+    logger.info(f"/settings/persona/preview: generated {len(samples)} samples")
+    return {"samples": samples}

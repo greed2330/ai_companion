@@ -2,6 +2,7 @@
 능동 알림 주기 제어 서비스.
 
 핵심 원칙: "말 걸고 싶어도 참는다"
+- 삐짐 상태 → 예외 이벤트 외 전부 차단
 - 같은 종류 알림 하루 1회 제한
 - 최소 간격 미달 시 스킵
 - 무시 3회 이상 → 당일 autonomous_talk 중단
@@ -9,7 +10,7 @@
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import aiosqlite
 
@@ -44,6 +45,9 @@ DAILY_MAX: dict[str, int] = {
 # 무시 횟수 임계값 — 이 이상이면 autonomous_talk 당일 중단
 _IGNORE_SUPPRESS_COUNT = 3
 
+# 삐짐 상태에서도 허용하는 이벤트
+_SULKY_EXCEPTIONS: frozenset[str] = frozenset({"late_night", "afk_return", "work_time_5h"})
+
 
 def _today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
@@ -54,15 +58,22 @@ async def can_trigger(event_type: str) -> bool:
     주기 규칙을 모두 통과하면 True 반환.
 
     체크 순서:
-    1. DAILY_ONCE — 오늘 이미 발생했으면 False
-    2. INTERVAL_RULES — 최소 간격 미달이면 False (None = 세션당 1회)
-    3. DAILY_MAX — 하루 최대 초과하면 False
-    4. 무시 억제 — autonomous_talk 한정, 당일 무시 3회 이상이면 False
+    1. 삐짐 상태 — 예외 이벤트 외 False
+    2. DAILY_ONCE — 오늘 이미 발생했으면 False
+    3. INTERVAL_RULES — 최소 간격 미달이면 False (None = 세션당 1회)
+    4. DAILY_MAX — 하루 최대 초과하면 False
+    5. 무시 억제 — autonomous_talk 한정, 당일 무시 3회 이상이면 False
     """
+    # 1. 삐짐 상태 차단 (DB 불필요 — in-memory 체크)
+    from backend.services.sulky_service import is_sulky
+    if is_sulky() and event_type not in _SULKY_EXCEPTIONS:
+        logger.debug("can_trigger: blocked — sulky state active (event=%s)", event_type)
+        return False
+
     today = _today()
     async with aiosqlite.connect(DB_PATH) as db:
 
-        # 1. DAILY_ONCE 체크
+        # 2. DAILY_ONCE 체크
         if event_type in DAILY_ONCE:
             async with db.execute(
                 "SELECT id FROM proactive_log "
@@ -73,7 +84,7 @@ async def can_trigger(event_type: str) -> bool:
                     logger.debug("can_trigger: %s already triggered today", event_type)
                     return False
 
-        # 2. INTERVAL_RULES 체크
+        # 3. INTERVAL_RULES 체크
         if event_type in INTERVAL_RULES:
             interval = INTERVAL_RULES[event_type]
             if interval is None:
@@ -108,7 +119,7 @@ async def can_trigger(event_type: str) -> bool:
                         )
                         return False
 
-        # 3. DAILY_MAX 체크
+        # 4. DAILY_MAX 체크
         if event_type in DAILY_MAX:
             async with db.execute(
                 "SELECT COUNT(*) FROM proactive_log "
@@ -123,7 +134,7 @@ async def can_trigger(event_type: str) -> bool:
                 )
                 return False
 
-        # 4. 무시 억제 — autonomous_talk 한정
+        # 5. 무시 억제 — autonomous_talk 한정
         if event_type == "autonomous_talk":
             async with db.execute(
                 "SELECT COUNT(*) FROM proactive_log "

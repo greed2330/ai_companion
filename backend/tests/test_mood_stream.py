@@ -177,7 +177,7 @@ async def test_mood_trigger_from_message(client):
     """POST /chat 응답에 에러 키워드가 있으면 CONCERNED 무드로 바뀌어야 한다."""
     mock_tokens = ["에러", " 났어요"]
 
-    async def fake_stream(history, memory_context=None):
+    async def fake_stream(history, system_prompt=None, use_think=False):
         for t in mock_tokens:
             yield t
 

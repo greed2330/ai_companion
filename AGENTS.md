@@ -1179,9 +1179,14 @@ AGENTS.md   = 둘 다 읽고 업데이트함
 ```json
 {
   "message": "하나야 안녕",
-  "conversation_id": "uuid-or-null"
+  "conversation_id": "uuid-or-null",
+  "interaction_type": "coding",
+  "voice_mode": false
 }
 ```
+
+`interaction_type` 값: `"coding"` | `"chat"` | `"game"` | null (auto-detect)
+`voice_mode`: true이면 응답 후처리(이모지 제거, 50자 이내 단문화) + think 강제 비활성화
 
 응답 (Server-Sent Events):
 ```
@@ -1190,6 +1195,11 @@ data: {"type": "token", "content": "녕"}
 data: {"type": "token", "content": "!"}
 data: {"type": "done", "message_id": "uuid", "conversation_id": "uuid", "mood": "HAPPY"}
 data: [DONE]
+```
+
+룸 변경 이벤트 (대화 내 룸 타입 전환 시):
+```
+data: {"type": "room_change", "room_type": "coding", "message": "코딩 대화로 바꿀게~"}
 ```
 
 에러 응답:
@@ -1429,14 +1439,14 @@ audio: <wav 파일>
 ```json
 {
   "ai_name": "하나",
-  "owner_nickname": "주인",
-  "tone": "casual",
-  "interests": ["coding", "gaming"],
-  "hotkey": "Alt+H"
+  "owner_nickname": "",
+  "speech_style": "",
+  "speech_preset": "bright_friend",
+  "personality": "",
+  "personality_preset": "energetic",
+  "interests": ""
 }
 ```
-
-tone 값: `"casual"` | `"friendly"` | `"formal"`
 
 ---
 
@@ -1445,11 +1455,11 @@ tone 값: `"casual"` | `"friendly"` | `"formal"`
 요청:
 ```json
 {
-  "ai_name": "하나",
-  "owner_nickname": "형",
-  "tone": "casual",
-  "interests": ["coding", "gaming", "music"],
-  "hotkey": "Alt+H"
+  "ai_name": "루나",
+  "owner_nickname": "자기야",
+  "speech_preset": "cheerful_girl",
+  "personality_preset": "warm",
+  "interests": "게임이랑 코딩"
 }
 ```
 
@@ -1458,7 +1468,23 @@ tone 값: `"casual"` | `"friendly"` | `"formal"`
 {"success": true}
 ```
 
-변경 즉시 `data/persona.json` 저장. 다음 `/chat` 요청부터 시스템 프롬프트에 반영.
+변경 즉시 `data/settings.json` `persona` 키에 저장. 다음 `/chat` 요청부터 시스템 프롬프트에 반영.
+
+---
+
+**POST /settings/persona/preview** — 페르소나 말투 샘플 생성 (Phase 3)
+
+요청:
+```json
+{"speech_preset": "tsundere", "personality_preset": "playful"}
+```
+
+응답:
+```json
+{"samples": ["...뭐야, 왜 봐.", "그런 거 신경 안 써도 되거든.", "잘 지냈어? 물어보는 거 아니야."]}
+```
+
+저장하지 않음. think 모드 강제 비활성화. LLM 3회 호출.
 
 ---
 
@@ -1643,11 +1669,11 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/proactive-timing (커밋 완료, PR 대기)
+현재 작업 브랜치: claude/phase3-think-prompt (커밋 완료, PR 대기)
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 4 능동 알림 주기 제어 시스템 — proactive_log, /proactive/* 엔드포인트 3개 (2026-03-19)
+마지막 완료: think 동적 제어 + 시스템 프롬프트 재작성 + 음성 모드 + 삐짐 로직 (2026-03-24)
 블로커: 없음
-다음 작업: dev 머지 후 Phase 4 나머지 (MCP, 화면인식 등) 대기
+다음 작업: dev 머지 후 PROMPT_04-6B 작업 대기
 ```
 
 **완료된 태스크 (Phase 1):**
@@ -1712,6 +1738,22 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] AGENTS.md 3-7: 능동 알림 주기 규칙 테이블 추가
 - [x] AGENTS.md 9-1: /proactive/check, /proactive/ignored, /proactive/status 계약 추가
 - [x] backend/tests/test_proactive.py: 17개 테스트 — 68/68 전부 통과
+
+**완료된 태스크 (Phase 3 think/prompt/voice/sulky):**
+- [x] services/llm.py: 시스템 프롬프트 재작성 — 자연어 말투, 금지 문구 명시, Good/Bad 예시
+- [x] services/llm.py: `should_use_think()` — interaction_type + 키워드 기반 동적 think 모드
+- [x] services/llm.py: `postprocess_for_voice()` — 이모지/마크다운 제거, 50자 이내 단문화
+- [x] services/llm.py: `build_system_prompt()` — mood/persona/voice_mode/sulky/memories 전부 반영
+- [x] services/llm.py: `complete_chat()` — 페르소나 프리뷰용 단발 호출 헬퍼
+- [x] services/llm.py: `stream_chat()` — think=True 스트림 파서 (thinking 청크 DEBUG 로그)
+- [x] services/sulky_service.py: 삐짐 인메모리 상태 + RECONCILE_KEYWORDS 화해 감지
+- [x] services/room_service.py: `detect_room_type()` — 키워드 기반 coding/game/general 분류
+- [x] services/settings_service.py: `get_persona()` / `set_persona()` + settings.json 통합 관리
+- [x] services/proactive_service.py: `can_trigger()`에 sulky 체크 추가 (SULKY_EXCEPTIONS 존중)
+- [x] routers/settings.py: GET/POST `/settings/persona`, POST `/settings/persona/preview`
+- [x] routers/chat.py: `interaction_type` + `voice_mode` 필드, 룸 감지 + room_change SSE, 삐짐 화해 처리
+- [x] AGENTS.md 9-1: POST /chat 신규 필드(interaction_type, voice_mode) + room_change 이벤트 추가
+- [x] backend/tests/test_think_voice_sulky_room.py: 33개 테스트 — 101/101 전부 통과
 
 **Codex에게 전달할 브리핑:**
 - 능동 알림 주기 제어 API 완료.
