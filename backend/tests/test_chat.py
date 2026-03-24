@@ -7,7 +7,7 @@ import json
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +17,8 @@ def use_tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", db_file)
     import backend.models.schema as schema_mod
     monkeypatch.setattr(schema_mod, "DB_PATH", db_file)
+    import backend.services.chat_pipeline as cp_mod
+    monkeypatch.setattr(cp_mod, "DB_PATH", db_file)
     import backend.routers.chat as chat_mod
     monkeypatch.setattr(chat_mod, "DB_PATH", db_file)
     import backend.routers.memory as mem_mod
@@ -62,12 +64,17 @@ def parse_sse(text: str) -> list[dict]:
 @pytest.mark.asyncio
 async def test_chat_happy_path(client):
     """정상 메시지 → SSE 스트림에 token 이벤트와 done 이벤트가 포함된다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, system_prompt=None, use_think=False):
+    async def fake_stream(messages, system_prompt, use_think):
         for tok in ["안", "녕", "!"]:
             yield tok
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post("/chat", json={"message": "하나야 안녕"})
 
     assert resp.status_code == 200
@@ -92,12 +99,17 @@ async def test_chat_happy_path(client):
 @pytest.mark.asyncio
 async def test_chat_reuses_conversation_id(client):
     """conversation_id를 지정하면 같은 세션으로 이어진다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, system_prompt=None, use_think=False):
+    async def fake_stream(messages, system_prompt, use_think):
         yield "응"
 
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
     conv_id = "test-conv-0001"
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post(
             "/chat", json={"message": "안녕", "conversation_id": conv_id}
         )
@@ -127,12 +139,17 @@ async def test_chat_empty_message_returns_error(client):
 @pytest.mark.asyncio
 async def test_chat_llm_unavailable(client):
     """Ollama 연결 실패 시 SSE error 이벤트를 반환한다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fail_stream(messages, system_prompt=None, use_think=False):
+    async def fail_stream(messages, system_prompt, use_think):
         raise RuntimeError("Ollama 연결 실패")
         yield  # AsyncGenerator 타입 만족
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fail_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fail_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post("/chat", json={"message": "안녕"})
 
     assert resp.status_code == 200
@@ -149,11 +166,16 @@ async def test_chat_llm_unavailable(client):
 @pytest.mark.asyncio
 async def test_history_returns_messages(client):
     """대화 후 /history로 메시지를 조회할 수 있다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, system_prompt=None, use_think=False):
+    async def fake_stream(messages, system_prompt, use_think):
         yield "응답이야"
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post("/chat", json={"message": "테스트"})
 
     events = parse_sse(resp.text)
@@ -175,11 +197,16 @@ async def test_history_returns_messages(client):
 @pytest.mark.asyncio
 async def test_conversations_list(client):
     """대화 후 /conversations에서 세션이 조회된다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, system_prompt=None, use_think=False):
+    async def fake_stream(messages, system_prompt, use_think):
         yield "응"
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         await client.post("/chat", json={"message": "안녕"})
 
     resp = await client.get("/conversations")
@@ -195,11 +222,16 @@ async def test_conversations_list(client):
 @pytest.mark.asyncio
 async def test_feedback_success(client):
     """정상 피드백 요청은 success: true를 반환한다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, system_prompt=None, use_think=False):
+    async def fake_stream(messages, system_prompt, use_think):
         yield "응"
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         chat_resp = await client.post("/chat", json={"message": "테스트"})
 
     events = parse_sse(chat_resp.text)

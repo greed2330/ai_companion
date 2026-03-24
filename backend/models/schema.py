@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS messages (
     content                 TEXT NOT NULL,
     interaction_type        TEXT,
     mood_at_response        TEXT,
+    owner_emotion           TEXT,
     response_time_ms        INTEGER,
     input_mode              TEXT DEFAULT 'text',
     is_proactive            INTEGER DEFAULT 0,
@@ -124,6 +125,7 @@ _MESSAGES_NEW_COLUMNS = [
     ("is_proactive", "INTEGER DEFAULT 0"),
     ("screen_context", "TEXT"),
     ("owner_response_delay_ms", "INTEGER"),
+    ("owner_emotion", "TEXT"),
 ]
 
 

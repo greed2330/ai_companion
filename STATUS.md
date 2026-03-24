@@ -29,11 +29,11 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase3-think-prompt (커밋 완료, PR 대기)
+현재 작업 브랜치: claude/phase3-llm-router (커밋 완료, PR 대기)
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: think 동적 제어 + 시스템 프롬프트 재작성 + 음성 모드 + 삐짐 로직 (2026-03-24)
+마지막 완료: LLM Router + Dual-Call Pipeline + Session Judge + Reaction Engine (2026-03-24)
 블로커: 없음
-다음 작업: dev 머지 후 PROMPT_04-6B 작업 대기
+다음 작업: dev 머지 후 다음 PROMPT 작업 대기
 ```
 
 **완료된 태스크 (Phase 1):**
@@ -119,6 +119,28 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] API_CONTRACT.md 신규 분리 (AGENTS.md 9-1에서 이동)
 - [x] STATUS.md 신규 분리 (AGENTS.md 섹션 10에서 이동)
 - [x] CLAUDE.md, CODEX.md 레퍼런스 업데이트
+
+**완료된 태스크 (PROMPT_04-6B: LLM Router + Dual-Call Pipeline):**
+- [x] backend/models/emotion.py: EMOTION_TO_MOOD 매핑
+- [x] backend/services/llm_router.py: LLMRouter (ollama/openai/anthropic/protocol/custom), stream/call_for_json
+- [x] backend/services/session_judge.py: SessionContext, judge_session_start, save_session_end
+- [x] backend/services/safety_filter.py: should_block, get_block_response
+- [x] backend/services/response_parser.py: ParsedResponse, parse_response (규칙 기반)
+- [x] backend/services/internal_prompt_builder.py: build_internal_state_prompt
+- [x] backend/services/tts_emotion.py: get_tts_params (강도 보간)
+- [x] backend/services/reaction_engine.py: 3-tier 필터, ReactionEngine.judge
+- [x] backend/services/model_context_service.py: on_model_changed, get_model_llm_context
+- [x] backend/services/model_scheduler.py: is_apple_silicon, prepare/restore stub
+- [x] backend/services/context_builder.py: build_context (메모리 + 상황 주입)
+- [x] backend/services/chat_pipeline.py: 듀얼콜 파이프라인 (스트리밍 1st + 백그라운드 2nd)
+- [x] backend/services/llm.py: get_ollama_base_url() 추가
+- [x] backend/routers/chat.py: thin wrapper, feedback score 검증
+- [x] backend/routers/settings.py: GET/POST /settings/llm, /test, /protocol/*, /current-context
+- [x] backend/main.py: load_cached_context() lifespan 등록
+- [x] backend/models/schema.py: owner_emotion 컬럼 추가 (CREATE + migration)
+- [x] backend/tests/test_llm_router_and_pipeline.py: 36개 테스트
+- [x] 기존 테스트 6개 파일 패치 업데이트 (chat_mod → cp_mod, llm_router mock)
+- [x] 전체 테스트 137/137 통과
 
 **Codex에게 전달할 브리핑:**
 - 능동 알림 주기 제어 API 완료.

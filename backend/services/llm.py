@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_KEEP_ALIVE: int = -1  # 항상 메모리 상주 (-1 = integer)
 
+
+def get_ollama_base_url() -> str:
+    """OLLAMA_BASE_URL을 반환한다. llm_router에서 사용."""
+    return OLLAMA_BASE_URL
+
 # ---------------------------------------------------------------------------
 # 시스템 프롬프트
 # ---------------------------------------------------------------------------
