@@ -24,8 +24,8 @@ def use_tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", db_file)
     import backend.models.schema as schema_mod
     monkeypatch.setattr(schema_mod, "DB_PATH", db_file)
-    import backend.routers.chat as chat_mod
-    monkeypatch.setattr(chat_mod, "DB_PATH", db_file)
+    import backend.services.chat_pipeline as cp_mod
+    monkeypatch.setattr(cp_mod, "DB_PATH", db_file)
     import backend.routers.memory as mem_mod
     monkeypatch.setattr(mem_mod, "DB_PATH", db_file)
     import backend.services.proactive_service as svc_mod

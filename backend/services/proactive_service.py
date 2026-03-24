@@ -176,3 +176,37 @@ async def mark_ignored(log_id: str) -> None:
         )
         await db.commit()
     logger.info("proactive mark_ignored: id=%s", log_id)
+
+
+async def check_and_react(
+    event_type: str,
+    owner_state: str = "IDLE",
+) -> bool:
+    """
+    주기 규칙 체크 + 리액션 엔진 판단을 조합한다.
+    반응해야 하면 True (템플릿 리액션이면 자동으로 SSE push).
+    strategy가 "worker" 또는 "full"이면 True만 반환하고 LLM 호출은 호출자 책임.
+    """
+    if not await can_trigger(event_type):
+        return False
+
+    from backend.services.reaction_engine import reaction_engine, EVENT_PRIORITY
+    from backend.services.mood import get_mood, push_event as _push
+
+    priority = EVENT_PRIORITY.get(event_type, 0.3)
+    current_mood = get_mood()["mood"]
+    decision = reaction_engine.judge(event_type, priority, owner_state)
+
+    if not decision.should_react:
+        return False
+
+    if decision.strategy == "template" and decision.template_key:
+        motion = reaction_engine.get_template(decision.template_key)
+        _push({
+            "type":            "emotion_update",
+            "motion_sequence": motion.get("motion_sequence", []),
+        })
+        return True
+
+    # strategy "worker" or "full" → 호출자가 LLM 처리
+    return True

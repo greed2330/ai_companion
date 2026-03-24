@@ -15,7 +15,7 @@ import json
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from unittest.mock import AsyncMock, patch, AsyncMock as AM
+from unittest.mock import AsyncMock, MagicMock, patch, AsyncMock as AM
 
 
 # ── 공통 픽스처 ──────────────────────────────────────────────────
@@ -27,8 +27,8 @@ def use_tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", db_file)
     import backend.models.schema as schema_mod
     monkeypatch.setattr(schema_mod, "DB_PATH", db_file)
-    import backend.routers.chat as chat_mod
-    monkeypatch.setattr(chat_mod, "DB_PATH", db_file)
+    import backend.services.chat_pipeline as cp_mod
+    monkeypatch.setattr(cp_mod, "DB_PATH", db_file)
     import backend.routers.memory as mem_mod
     monkeypatch.setattr(mem_mod, "DB_PATH", db_file)
     import backend.services.proactive_service as svc_mod
@@ -62,10 +62,10 @@ def reset_sulky():
 
 @pytest.fixture(autouse=True)
 def reset_conversation_rooms():
-    import backend.routers.chat as chat_mod
-    chat_mod._conversation_rooms.clear()
+    import backend.services.chat_pipeline as cp_mod
+    cp_mod._conversation_rooms.clear()
     yield
-    chat_mod._conversation_rooms.clear()
+    cp_mod._conversation_rooms.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -321,12 +321,18 @@ def test_system_prompt_memories():
 @pytest.mark.asyncio
 async def test_chat_voice_mode_short_response(client):
     """voice_mode=True이면 응답이 후처리되어 짧아진다."""
+    import backend.services.chat_pipeline as cp_mod
+
     long_response = "이건 첫 번째 문장이야. " + "추가 내용 " * 10
 
-    async def mock_stream(*args, **kwargs):
+    async def mock_stream(messages, system_prompt, use_think):
         yield long_response
 
-    with patch("backend.routers.chat.stream_chat", side_effect=mock_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = mock_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post(
             "/chat",
             json={"message": "안녕", "voice_mode": True},
@@ -343,12 +349,17 @@ async def test_chat_voice_mode_short_response(client):
 async def test_chat_interaction_type_saved(client):
     """interaction_type이 DB messages 테이블에 저장된다."""
     import aiosqlite
+    import backend.services.chat_pipeline as cp_mod
     from backend.models.schema import DB_PATH as db_path
 
-    async def mock_stream(*args, **kwargs):
+    async def mock_stream(messages, system_prompt, use_think):
         yield "응답"
 
-    with patch("backend.routers.chat.stream_chat", side_effect=mock_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = mock_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post(
             "/chat",
             json={"message": "버그 있어", "interaction_type": "coding"},
@@ -367,18 +378,22 @@ async def test_chat_interaction_type_saved(client):
 @pytest.mark.asyncio
 async def test_chat_room_change_event(client):
     """룸 타입이 바뀌면 room_change 이벤트가 SSE에 포함된다."""
-    async def mock_stream(*args, **kwargs):
+    import backend.services.chat_pipeline as cp_mod
+
+    async def mock_stream(messages, system_prompt, use_think):
         yield "응답"
 
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = mock_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+
     # 첫 요청 (general)
-    with patch("backend.routers.chat.stream_chat", side_effect=mock_stream):
+    with patch.object(cp_mod, "llm_router", mock_router):
         await client.post("/chat", json={"message": "안녕"})
 
     # 두 번째 요청 (coding으로 변경)
-    async def mock_stream2(*args, **kwargs):
-        yield "응답"
-
-    with patch("backend.routers.chat.stream_chat", side_effect=mock_stream2):
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post(
             "/chat",
             json={"message": "이 코드 버그 있어"},

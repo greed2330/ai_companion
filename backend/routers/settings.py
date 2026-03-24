@@ -15,6 +15,12 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.services.llm import build_system_prompt, complete_chat
+from backend.services.llm_router import llm_router
+from backend.services.model_context_service import (
+    get_current_context,
+    on_model_changed,
+)
 from backend.services.mood import push_event
 from backend.services.settings_service import (
     get_current_chat_model,
@@ -22,7 +28,6 @@ from backend.services.settings_service import (
     set_current_chat_model,
     set_persona,
 )
-from backend.services.llm import build_system_prompt, complete_chat
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +146,13 @@ async def select_character_model(req: SelectCharacterModelRequest) -> dict:
 
     _current_character_model_id = req.model_id
     logger.info(f"/settings/models/select: character model changed to {req.model_id}")
+
+    # 선택된 모델의 파라미터 컨텍스트 업데이트
+    selected = next(m for m in models if m["id"] == req.model_id)
+    try:
+        await on_model_changed(req.model_id, selected["path"], selected["type"])
+    except Exception as e:
+        logger.warning(f"model_context update failed: {e}")
 
     push_event({
         "type": "model_change",
@@ -271,3 +283,116 @@ async def preview_persona(req: PersonaPreviewRequest) -> dict:
 
     logger.info(f"/settings/persona/preview: generated {len(samples)} samples")
     return {"samples": samples}
+
+
+# ── LLM 소스 설정 엔드포인트 ─────────────────────────────────────
+
+
+@router.get("/settings/llm")
+async def get_llm_settings() -> dict:
+    """현재 LLM 소스 설정을 반환한다."""
+    return {
+        "source":             llm_router.source,
+        "api_key_masked":     "***" if llm_router._api_key else None,
+        "endpoint":           llm_router._custom_endpoint,
+        "protocol_connected": llm_router._protocol_connected,
+    }
+
+
+class LlmConfigRequest(BaseModel):
+    source: str               # "ollama" | "openai" | "anthropic" | "custom"
+    api_key: str = ""
+    endpoint: str = ""
+
+
+@router.post("/settings/llm")
+async def configure_llm(req: LlmConfigRequest) -> dict:
+    """LLM 소스를 변경한다. in-memory 업데이트 + data/settings.json 저장."""
+    llm_router.configure(
+        source=req.source,
+        api_key=req.api_key or None,
+        endpoint=req.endpoint or None,
+    )
+    # settings.json에 소스 정보 저장 (api_key 제외 — 보안)
+    from backend.services.settings_service import _read_settings, _write_settings
+    data = _read_settings()
+    data["llm_source"] = {
+        "source":   req.source,
+        "endpoint": req.endpoint or None,
+    }
+    _write_settings(data)
+    logger.info(f"/settings/llm POST: source={req.source}")
+    return {"success": True, "source": req.source}
+
+
+class LlmTestRequest(BaseModel):
+    source: str
+    api_key: str = ""
+    endpoint: str = ""
+
+
+@router.post("/settings/llm/test")
+async def test_llm_connection(req: LlmTestRequest) -> dict:
+    """임시로 소스를 설정해 연결을 테스트한다. 설정은 저장하지 않는다."""
+    original_source = llm_router.source
+    original_key = llm_router._api_key
+    original_endpoint = llm_router._custom_endpoint
+
+    try:
+        llm_router.configure(
+            source=req.source,
+            api_key=req.api_key or None,
+            endpoint=req.endpoint or None,
+        )
+        result = await llm_router.test_connection()
+    finally:
+        # 원복
+        llm_router.source = original_source
+        llm_router._api_key = original_key
+        llm_router._custom_endpoint = original_endpoint
+
+    logger.info(f"/settings/llm/test: source={req.source} success={result.get('success')}")
+    return result
+
+
+class ProtocolConnectRequest(BaseModel):
+    endpoint: str
+
+
+@router.post("/settings/llm/protocol/connect")
+async def connect_protocol(req: ProtocolConnectRequest) -> dict:
+    """Professor emotion protocol에 연결한다."""
+    llm_router.configure(source="protocol", endpoint=req.endpoint)
+    logger.info(f"/settings/llm/protocol/connect: endpoint={req.endpoint}")
+    return {"success": True, "protocol_connected": True}
+
+
+@router.delete("/settings/llm/protocol")
+async def disconnect_protocol() -> dict:
+    """Protocol 연결을 해제하고 ollama fallback으로 복귀한다."""
+    llm_router.disconnect_protocol()
+    llm_router.source = "ollama"
+    logger.info("/settings/llm/protocol DELETE: disconnected")
+    return {"success": True, "protocol_connected": False}
+
+
+# ── 모델 컨텍스트 엔드포인트 ─────────────────────────────────────
+
+
+@router.get("/settings/models/current-context")
+async def get_model_context() -> dict:
+    """
+    현재 선택된 캐릭터 모델의 파라미터 컨텍스트를 반환한다.
+    05-D generative motion system에서 사용.
+    """
+    ctx = get_current_context()
+    if not ctx:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": True,
+                "code": "NO_MODEL_CONTEXT",
+                "message": "No model context. Select a character model first.",
+            },
+        )
+    return ctx

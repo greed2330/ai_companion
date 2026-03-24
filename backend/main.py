@@ -16,6 +16,7 @@ from backend.routers.memory import router as memory_router
 from backend.routers.mood import router as mood_router
 from backend.routers.proactive import router as proactive_router
 from backend.routers.settings import router as settings_router
+from backend.services.model_context_service import load_cached_context
 
 
 def _setup_logging() -> None:
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
     os.makedirs("data", exist_ok=True)
     await init_db()
     logger.info("DB initialized")
+    load_cached_context()
     yield
     logger.info("HANA backend shutting down")
 
