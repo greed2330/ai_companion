@@ -1,18 +1,20 @@
 # HANA Project — Codex Instructions (Frontend)
 
 > Read AGENTS.md in full before starting any task.
+> Read STATUS.md before starting any task — current phase status and file ownership.
 > This file covers coding rules and workflow for the frontend.
 
 ## References
 - Full design & architecture: @AGENTS.md
-- API contract (call specs): AGENTS.md section 9-1
+- API contract (call specs): @API_CONTRACT.md (AGENTS.md 9-1에서 분리됨)
+- Current status & agent briefs: @STATUS.md (AGENTS.md 섹션 10에서 분리됨)
 - Repo structure: AGENTS.md section 5-3
 
 ## Your Role
 **You are frontend-only.**
 - Scope: `frontend/` directory only
 - NEVER touch `backend/`
-- Call APIs exactly as defined in AGENTS.md 9-1. No deviations.
+- Call APIs exactly as defined in API_CONTRACT.md. No deviations.
 - If backend not ready → use mocks. Connect later.
 
 ---
@@ -61,7 +63,7 @@
 - Prop types required on all components.
 
 ### SSE Streaming — CRITICAL
-Parse exactly per AGENTS.md 9-1:
+Parse exactly per API_CONTRACT.md:
 ```js
 // "token"  → append content to current message
 // "done"   → extract message_id, conversation_id, mood
@@ -129,7 +131,7 @@ All tests must pass before opening a PR. No exceptions.
 □ Any TODO / FIXME / console.log() left? → Clean up.
 □ Does the UI look right visually? → Check in Electron.
 □ Run tests in Docker one more time after cleanup
-□ Update AGENTS.md section 10 (🟡 Codex 상태) with current state
+□ Update STATUS.md (🟡 Codex 상태) with current state
 ```
 
 ---
@@ -137,17 +139,17 @@ All tests must pass before opening a PR. No exceptions.
 ## Workflow
 
 ### Before Starting
-1. Check AGENTS.md section 10 — read current status and file ownership
-2. If files you need are owned by Claude Code → wait or coordinate via section 10
+1. Check STATUS.md — read current status and file ownership
+2. If files you need are owned by Claude Code → wait or coordinate via STATUS.md
 3. Create branch from latest dev:
    ```
    git checkout dev && git pull && git checkout -b codex/phase{N}-{feature}
    ```
-4. Log in AGENTS.md section 10: "Taking ownership of [files]. Starting [task]."
-5. API behavior → trust AGENTS.md 9-1 only. Do not assume backend behavior.
+4. Log in STATUS.md: "Taking ownership of [files]. Starting [task]."
+5. API behavior → trust API_CONTRACT.md only. Do not assume backend behavior.
 
 ### Inter-Agent Communication
-**AGENTS.md section 10 is the ONLY channel between agents.**
+**STATUS.md is the ONLY channel between agents.**
 Never assume Claude Code knows something unless it's written there.
 
 | Situation | Action |
@@ -155,10 +157,10 @@ Never assume Claude Code knows something unless it's written there.
 | Starting work | Log: files you own + what you're building |
 | Task complete | Log: done status + handoff notes for Claude Code |
 | Blocked | Log: the exact blocker. Stop. Do not guess. |
-| Backend API not ready | Use mock data. Log in section 10 what you're mocking. |
+| Backend API not ready | Use mock data. Log in STATUS.md what you're mocking. |
 | API contract must change | STOP. Log proposed change. Wait for Claude (web) approval. |
 
-Update section 10 after every meaningful unit of work — not just at PR time.
+Update STATUS.md after every meaningful unit of work — not just at PR time.
 
 ### README Sync Rule
 - If startup steps, run commands, required local files, env vars, or setup flow change, update `README.md` in the same task.
@@ -174,20 +176,20 @@ codex/*  ← your branches only. never touch claude/*.
 ```
 
 - Before PR → rebase onto dev: `git fetch origin && git rebase origin/dev`
-- Merge conflict during rebase → do NOT resolve alone. Log in section 10 and stop.
+- Merge conflict during rebase → do NOT resolve alone. Log in STATUS.md and stop.
 - Never force-push to `dev` or `main`
 - Commit after every working unit, not just at PR time
 
 ### Progress Checkpoints
 - Every 3 files modified → intermediate commit
 - Every component complete → write test → verify passes → commit
-- Blocked 15+ minutes → log in AGENTS.md section 10, stop or move on
-- When owner says "wrap up" / "마무리해줘" → run self-review → update section 10 → close
+- Blocked 15+ minutes → log in STATUS.md, stop or move on
+- When owner says "wrap up" / "마무리해줘" → run self-review → update STATUS.md → close
 
 ### NEVER
 - Modify `backend/`
 - Hardcode `http://localhost:8000` → use `VITE_API_BASE_URL` env var
-- Change SSE parsing from AGENTS.md 9-1 format
+- Change SSE parsing from API_CONTRACT.md format
 - Mix Main/Renderer responsibilities
 - Resolve merge conflicts without logging them
 - Change the API contract without approval from Claude (web)
@@ -205,7 +207,7 @@ codex/*  ← your branches only. never touch claude/*.
 □ Chat renders and SSE streams correctly
 □ Error state UI works
 □ Visually checked in Electron window
-□ AGENTS.md section 10 updated:
+□ STATUS.md updated:
   □ Completed tasks checked
   □ File ownership released
   □ Handoff notes written for Claude Code / next session
@@ -216,7 +218,7 @@ codex/*  ← your branches only. never touch claude/*.
 1. Read full console error
 2. Write a test that reproduces the bug, then fix it
 3. Verify fix works and test passes
-4. Unresolved → log in AGENTS.md section 10 and stop
+4. Unresolved → log in STATUS.md and stop
 
 ---
 

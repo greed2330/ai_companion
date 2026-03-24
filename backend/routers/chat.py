@@ -19,21 +19,33 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.models.schema import DB_PATH
-from backend.services.llm import stream_chat
+from backend.services.llm import (
+    build_system_prompt,
+    postprocess_for_voice,
+    should_use_think,
+    stream_chat,
+)
 from backend.services.memory import search_memory, update_confidence
-from backend.services.mood import detect_mood_from_text, get_mood, set_mood
+from backend.services.mood import detect_mood_from_text, get_mood, push_event, set_mood
+from backend.services.room_service import ROOM_MESSAGES, detect_room_type
+from backend.services.settings_service import get_persona
+from backend.services.sulky_service import check_reconcile, is_sulky
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 하나 시스템에서 사용자 식별자 (현재는 단일 사용자)
 _OWNER_USER_ID = "owner"
+
+# 대화별 현재 룸 타입 추적 (in-memory)
+_conversation_rooms: dict[str, str] = {}
 
 
 class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
+    interaction_type: Optional[str] = None  # 'coding' | 'chat' | 'game' | None
+    voice_mode: bool = False
 
 
 async def _ensure_conversation(db: aiosqlite.Connection, conversation_id: str) -> None:
@@ -60,7 +72,6 @@ async def _load_recent_messages(
         (conversation_id, limit),
     ) as cursor:
         rows = await cursor.fetchall()
-    # 최신순으로 가져왔으니 역순으로 반환
     return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
 
 
@@ -78,7 +89,6 @@ async def _get_last_assistant_time(
     if not row:
         return None
     ts = row[0]
-    # SQLite는 timezone 정보가 없을 수 있으므로 UTC로 파싱
     try:
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
@@ -94,13 +104,14 @@ async def _save_message(
     mood: Optional[str] = None,
     response_time_ms: Optional[int] = None,
     owner_response_delay_ms: Optional[int] = None,
+    interaction_type: Optional[str] = None,
 ) -> None:
     await db.execute(
         """
         INSERT INTO messages
             (id, conversation_id, role, content, mood_at_response,
-             response_time_ms, owner_response_delay_ms, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             response_time_ms, owner_response_delay_ms, interaction_type, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             message_id,
@@ -110,6 +121,7 @@ async def _save_message(
             mood,
             response_time_ms,
             owner_response_delay_ms,
+            interaction_type,
             datetime.now(timezone.utc).isoformat(),
         ),
     )
@@ -130,10 +142,14 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     logger.info(f"/chat request received: conversation_id={conversation_id}")
 
     async def event_stream():
+        # 삐짐 화해 체크 — DB 접근 전에 처리
+        check_reconcile(req.message)
+        sulky = is_sulky()
+
         async with aiosqlite.connect(DB_PATH) as db:
             await _ensure_conversation(db, conversation_id)
 
-            # 오너 응답 딜레이 계산 (마지막 assistant 메시지 기준)
+            # 오너 응답 딜레이 계산
             last_time = await _get_last_assistant_time(db, conversation_id)
             delay_ms = (
                 int((request_time - last_time).total_seconds() * 1000)
@@ -145,63 +161,106 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             await _save_message(
                 db, user_msg_id, conversation_id, "user", req.message,
                 owner_response_delay_ms=delay_ms,
+                interaction_type=req.interaction_type,
             )
 
-            # 대화 히스토리 로드와 메모리 검색을 병렬 수행
+            # 룸 감지 — 변경 시 SSE 이벤트 발행
+            new_room = detect_room_type(req.message)
+            old_room = _conversation_rooms.get(conversation_id, "general")
+            if new_room != old_room:
+                _conversation_rooms[conversation_id] = new_room
+                room_event = {
+                    "type": "room_change",
+                    "room_type": new_room,
+                    "message": ROOM_MESSAGES.get(new_room, ""),
+                }
+                push_event(room_event)
+                yield f"data: {json.dumps(room_event, ensure_ascii=False)}\n\n"
+
+            # 대화 히스토리 + 메모리 병렬 조회
             history, memories = await asyncio.gather(
                 _load_recent_messages(db, conversation_id),
                 search_memory(_OWNER_USER_ID, req.message),
             )
 
-            # 참조된 기억의 confidence 업데이트
             for mem in memories:
                 await update_confidence(mem["id"], delta=0.1)
 
-            # 메모리를 시스템 프롬프트에 주입할 형식으로 조합
-            memory_context: Optional[str] = None
-            if memories:
-                memory_context = "\n".join(f"- {m['fact']}" for m in memories)
+            memory_list = [m["fact"] for m in memories] if memories else None
+
+            # 시스템 프롬프트 빌드
+            current_mood = get_mood()["mood"]
+            persona = get_persona()
+            system_prompt = build_system_prompt(
+                mood=current_mood,
+                persona=persona,
+                interaction_type=req.interaction_type,
+                voice_mode=req.voice_mode,
+                sulky=sulky,
+                memories=memory_list,
+            )
+
+            # think 모드 결정 (voice_mode이면 강제 False)
+            use_think = False if req.voice_mode else should_use_think(
+                req.message, req.interaction_type
+            )
 
             assistant_msg_id = str(uuid.uuid4())
-            full_response = []
+            full_response: list[str] = []
             start_ms = int(time.time() * 1000)
 
             try:
-                async for token in stream_chat(history, memory_context=memory_context):
-                    full_response.append(token)
-                    yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
+                async for token in stream_chat(
+                    history,
+                    system_prompt=system_prompt,
+                    use_think=use_think,
+                ):
+                    if req.voice_mode:
+                        # 음성 모드: 전체 응답을 모아서 후처리 후 단일 토큰으로 전송
+                        full_response.append(token)
+                    else:
+                        full_response.append(token)
+                        yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
             except Exception as exc:
                 logger.error(f"/chat LLM error: conversation_id={conversation_id} error={exc}")
                 yield f"data: {json.dumps({'type': 'error', 'code': 'LLM_UNAVAILABLE', 'message': str(exc)}, ensure_ascii=False)}\n\n"
                 return
 
             elapsed_ms = int(time.time() * 1000) - start_ms
-
-            # 응답 내용 기반으로 무드 자동 감지 및 업데이트
             full_text = "".join(full_response)
+
+            # 음성 모드: 후처리 후 단일 토큰 전송
+            if req.voice_mode:
+                processed = postprocess_for_voice(full_text)
+                yield f"data: {json.dumps({'type': 'token', 'content': processed}, ensure_ascii=False)}\n\n"
+                full_text = processed
+
             detected_mood = detect_mood_from_text(full_text)
             set_mood(detected_mood)
-            current_mood = detected_mood
 
             await _save_message(
                 db,
                 assistant_msg_id,
                 conversation_id,
                 "assistant",
-                "".join(full_response),
-                mood=current_mood,
+                full_text,
+                mood=detected_mood,
                 response_time_ms=elapsed_ms,
+                interaction_type=req.interaction_type,
             )
 
             done_event = {
                 "type": "done",
                 "message_id": assistant_msg_id,
                 "conversation_id": conversation_id,
-                "mood": current_mood,
+                "mood": detected_mood,
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
-            logger.info(f"/chat response complete: conversation_id={conversation_id} elapsed_ms={elapsed_ms}")
+            logger.info(
+                f"/chat response complete: conversation_id={conversation_id} "
+                f"elapsed_ms={elapsed_ms} think={use_think} voice={req.voice_mode}"
+            )
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
