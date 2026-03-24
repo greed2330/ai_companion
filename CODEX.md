@@ -5,14 +5,14 @@
 
 ## References
 - Full design & architecture: @AGENTS.md
-- API contract (call specs): AGENTS.md section 9-1
+- API contract (call specs): @API_CONTRACT.md (AGENTS.md 9-1에서 분리됨)
 - Repo structure: AGENTS.md section 5-3
 
 ## Your Role
 **You are frontend-only.**
 - Scope: `frontend/` directory only
 - NEVER touch `backend/`
-- Call APIs exactly as defined in AGENTS.md 9-1. No deviations.
+- Call APIs exactly as defined in API_CONTRACT.md. No deviations.
 - If backend not ready → use mocks. Connect later.
 
 ---
@@ -61,7 +61,7 @@
 - Prop types required on all components.
 
 ### SSE Streaming — CRITICAL
-Parse exactly per AGENTS.md 9-1:
+Parse exactly per API_CONTRACT.md:
 ```js
 // "token"  → append content to current message
 // "done"   → extract message_id, conversation_id, mood
@@ -144,7 +144,7 @@ All tests must pass before opening a PR. No exceptions.
    git checkout dev && git pull && git checkout -b codex/phase{N}-{feature}
    ```
 4. Log in AGENTS.md section 10: "Taking ownership of [files]. Starting [task]."
-5. API behavior → trust AGENTS.md 9-1 only. Do not assume backend behavior.
+5. API behavior → trust API_CONTRACT.md only. Do not assume backend behavior.
 
 ### Inter-Agent Communication
 **AGENTS.md section 10 is the ONLY channel between agents.**
@@ -187,7 +187,7 @@ codex/*  ← your branches only. never touch claude/*.
 ### NEVER
 - Modify `backend/`
 - Hardcode `http://localhost:8000` → use `VITE_API_BASE_URL` env var
-- Change SSE parsing from AGENTS.md 9-1 format
+- Change SSE parsing from API_CONTRACT.md format
 - Mix Main/Renderer responsibilities
 - Resolve merge conflicts without logging them
 - Change the API contract without approval from Claude (web)

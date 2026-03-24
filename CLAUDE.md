@@ -5,7 +5,7 @@
 
 ## References
 - Full design & architecture: @AGENTS.md
-- API contract: AGENTS.md section 9-1
+- API contract: @API_CONTRACT.md (AGENTS.md 9-1에서 분리됨)
 - DB schema: AGENTS.md section 6
 - Repo structure: AGENTS.md section 5-3
 
@@ -84,8 +84,8 @@
 
 ### API Responses
 - Success: HTTP 200, `{"data": ...}`
-- Error: AGENTS.md 9-1 error format exactly
-- SSE: AGENTS.md 9-1 stream format exactly — do NOT deviate
+- Error: API_CONTRACT.md error format exactly
+- SSE: API_CONTRACT.md stream format exactly — do NOT deviate
 
 ---
 
@@ -117,7 +117,7 @@ All tests must pass before opening a PR. No exceptions.
 | Target | Test for |
 |--------|----------|
 | `/chat` endpoint | valid request → SSE stream starts, `type: token` arrives |
-| `/chat` endpoint | missing message → returns error format from AGENTS.md 9-1 |
+| `/chat` endpoint | missing message → returns error format from API_CONTRACT.md |
 | DB schema | tables created on startup, no errors |
 | Memory service | fact extracted and stored correctly |
 | MCP whitelist | blocked command returns rejection, not execution |
