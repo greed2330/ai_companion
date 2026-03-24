@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import CharacterOverlay from "./components/CharacterOverlay";
-import ChatOverlay from "./components/ChatOverlay";
-import Settings from "./components/Settings";
 import BubbleWindow from "./components/bubble/BubbleWindow";
 import useMoodStream from "./hooks/useMoodStream";
+import MainWindow from "./pages/MainWindow";
 import { fetchModels } from "./services/settings";
 
 function CharacterScreen() {
@@ -29,7 +28,8 @@ function CharacterScreen() {
       const payload = await fetchModels();
       setModels(payload.models || []);
       setCurrentModelId(payload.current || modelId || null);
-    }
+    },
+    onRoomChange: () => {}
   });
 
   useEffect(() => {
@@ -49,39 +49,10 @@ function CharacterScreen() {
   return (
     <CharacterOverlay
       mood={mood}
-      modelPath={activeModel?.path || ""}
       modelName={activeModel?.name || "하나"}
+      modelPath={activeModel?.path || ""}
     />
   );
-}
-
-function ChatScreen() {
-  const [mood, setMood] = useState("IDLE");
-
-  useMoodStream({
-    onMoodChange: setMood,
-    onModelChange: () => {}
-  });
-
-  function handleAssistantReply(message, replyMood) {
-    window.hanaDesktop?.showBubble?.({
-      message,
-      mood: replyMood,
-      type: "talk"
-    });
-  }
-
-  return (
-    <ChatOverlay
-      mood={mood}
-      onMoodChange={setMood}
-      onAssistantReply={handleAssistantReply}
-    />
-  );
-}
-
-function SettingsScreen() {
-  return <Settings />;
 }
 
 function BubbleScreen() {
@@ -94,8 +65,7 @@ function App() {
       <Route path="/" element={<Navigate to="/character" replace />} />
       <Route path="/bubble" element={<BubbleScreen />} />
       <Route path="/character" element={<CharacterScreen />} />
-      <Route path="/chat" element={<ChatScreen />} />
-      <Route path="/settings" element={<SettingsScreen />} />
+      <Route path="/main" element={<MainWindow />} />
       <Route path="*" element={<Navigate to="/character" replace />} />
     </Routes>
   );

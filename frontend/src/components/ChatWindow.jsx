@@ -1,15 +1,38 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import { submitFeedback } from "../services/feedback";
 import { streamChat } from "../services/chat";
 
-function ChatWindow({ onMoodChange, onAssistantReply }) {
+const ROOM_CONFIG = {
+  general: { label: "일반 대화", icon: "🗨", interactionType: "chat" },
+  coding: { label: "코딩", icon: "💻", interactionType: "coding" },
+  game: { label: "게임", icon: "🎮", interactionType: "game" },
+  free: { label: "자유", icon: "", interactionType: null }
+};
+
+function ChatWindow({
+  autoRoom,
+  currentMood,
+  currentRoom,
+  onAutoRoomChange,
+  onMoodChange,
+  onNewConversation,
+  onRoomChange,
+  onRoomEvent,
+  settings
+}) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState("");
   const [feedbackState, setFeedbackState] = useState({});
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const endRef = useRef(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   async function handleFeedback(messageId, score) {
     if (!messageId || feedbackState[messageId]) {
@@ -32,6 +55,8 @@ function ChatWindow({ onMoodChange, onAssistantReply }) {
 
     const assistantId = `assistant-${Date.now()}`;
     let assistantContent = "";
+    const voiceMode = settings.inputMode === "voice";
+
     setError("");
     setInput("");
     setIsStreaming(true);
@@ -45,6 +70,8 @@ function ChatWindow({ onMoodChange, onAssistantReply }) {
       await streamChat({
         message: trimmed,
         conversationId,
+        interactionType: ROOM_CONFIG[currentRoom]?.interactionType,
+        voiceMode,
         onToken: (token) => {
           assistantContent += token;
           setMessages((prev) =>
@@ -70,8 +97,16 @@ function ChatWindow({ onMoodChange, onAssistantReply }) {
                 : message
             )
           );
-          onAssistantReply(assistantContent, nextMood);
-        }
+
+          if (voiceMode) {
+            window.hanaDesktop?.showBubble?.({
+              message: assistantContent.slice(0, 30),
+              mood: nextMood,
+              type: "talk"
+            });
+          }
+        },
+        onRoomChange: onRoomEvent
       });
     } catch (streamError) {
       setError(streamError.message);
@@ -87,14 +122,75 @@ function ChatWindow({ onMoodChange, onAssistantReply }) {
     }
   }
 
+  function handleRoomSelect(room) {
+    onRoomChange(room);
+    onAutoRoomChange(false);
+    setSidebarOpen(false);
+  }
+
   return (
     <section className="chat-window">
+      {sidebarOpen ? (
+        <>
+          <button
+            aria-label="sidebar-backdrop"
+            className="chat-sidebar__backdrop"
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <aside className="chat-sidebar" data-testid="chat-sidebar">
+            <button
+              type="button"
+              className="chat-sidebar__new"
+              onClick={() => {
+                onNewConversation();
+                setConversationId(null);
+                setMessages([]);
+                setSidebarOpen(false);
+              }}
+            >
+              + 새 대화
+            </button>
+            <div className="chat-sidebar__rooms">
+              {Object.entries(ROOM_CONFIG).map(([room, config]) => (
+                <button
+                  key={room}
+                  type="button"
+                  className={`chat-sidebar__room ${currentRoom === room ? "is-active" : ""}`}
+                  onClick={() => handleRoomSelect(room)}
+                >
+                  <span>{config.icon}</span>
+                  <span>{config.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="chat-sidebar__history">대화 기록은 다음 단계에서 연결돼.</div>
+          </aside>
+        </>
+      ) : null}
+
+      <div className="chat-window__toolbar">
+        <button
+          type="button"
+          className="chat-window__menu"
+          aria-label="Toggle sidebar"
+          onClick={() => setSidebarOpen((open) => !open)}
+        >
+          ☰
+        </button>
+        <div className="chat-window__meta">
+          <strong>{ROOM_CONFIG[currentRoom]?.label || ROOM_CONFIG.general.label}</strong>
+          <span>{autoRoom ? "자동 전환" : "수동 고정"}</span>
+        </div>
+        <span className="mood-indicator">{currentMood}</span>
+      </div>
+
       <div className="messages" aria-label="chat-messages">
         {messages.map((message) => (
           <article key={message.id} className={`message message--${message.role}`}>
             <strong>{message.role === "user" ? "You" : "HANA"}</strong>
             <p>{message.content}</p>
-            {message.role === "assistant" && message.id.startsWith("assistant-") === false ? (
+            {message.role === "assistant" && !message.id.startsWith("assistant-") ? (
               <div className="feedback-row">
                 <button
                   type="button"
@@ -114,12 +210,15 @@ function ChatWindow({ onMoodChange, onAssistantReply }) {
             ) : null}
           </article>
         ))}
+        <div ref={endRef} data-testid="messages-end" />
       </div>
+
       {error ? (
         <p className="error-text" role="alert">
           {error}
         </p>
       ) : null}
+
       <div className="composer">
         <input
           aria-label="message-input"
@@ -129,6 +228,14 @@ function ChatWindow({ onMoodChange, onAssistantReply }) {
           onKeyDown={handleKeyDown}
           disabled={isStreaming}
         />
+        <button
+          disabled
+          title="음성 입력 (Phase 4.5)"
+          type="button"
+          style={{ cursor: "not-allowed", opacity: 0.4 }}
+        >
+          🎙
+        </button>
         <button type="button" onClick={submitMessage} disabled={isStreaming}>
           전송
         </button>
@@ -138,8 +245,18 @@ function ChatWindow({ onMoodChange, onAssistantReply }) {
 }
 
 ChatWindow.propTypes = {
+  autoRoom: PropTypes.bool.isRequired,
+  currentMood: PropTypes.string.isRequired,
+  currentRoom: PropTypes.string.isRequired,
+  onAutoRoomChange: PropTypes.func.isRequired,
   onMoodChange: PropTypes.func.isRequired,
-  onAssistantReply: PropTypes.func.isRequired
+  onNewConversation: PropTypes.func.isRequired,
+  onRoomChange: PropTypes.func.isRequired,
+  onRoomEvent: PropTypes.func.isRequired,
+  settings: PropTypes.shape({
+    inputMode: PropTypes.string.isRequired
+  }).isRequired
 };
 
+export { ROOM_CONFIG };
 export default ChatWindow;

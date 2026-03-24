@@ -9,6 +9,10 @@ if (!global.TextDecoder) {
   global.TextDecoder = TextDecoder;
 }
 
+if (!window.HTMLElement.prototype.scrollIntoView) {
+  window.HTMLElement.prototype.scrollIntoView = jest.fn();
+}
+
 class MockBroadcastChannel {
   constructor(name) {
     this.name = name;
@@ -40,9 +44,12 @@ window.hanaDesktop = {
   notifyCharacterMouse: jest.fn(),
   onBubbleData: jest.fn(() => () => {}),
   onBubbleTail: jest.fn(() => () => {}),
+  onSetTab: jest.fn(() => () => {}),
   quitApp: jest.fn(),
   resolveAssetUrl: jest.fn(() => Promise.resolve("asset://mock")),
   showBubble: jest.fn(),
+  showMainChatWindow: jest.fn(),
+  showMainSettingsWindow: jest.fn(),
   showChatWindow: jest.fn(() => Promise.resolve()),
   showSettingsWindow: jest.fn(() => Promise.resolve()),
   toggleCharacterPinned: jest.fn(() => Promise.resolve({ pinned: true })),

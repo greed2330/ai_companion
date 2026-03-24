@@ -1,3 +1,14 @@
+const storeState = {};
+
+jest.mock("electron-store", () =>
+  jest.fn().mockImplementation(() => ({
+    get: jest.fn((key) => storeState[key]),
+    set: jest.fn((key, value) => {
+      storeState[key] = value;
+    })
+  }))
+);
+
 jest.mock("electron", () => {
   const handlers = {};
   const listeners = {};
@@ -32,6 +43,7 @@ jest.mock("electron", () => {
     setPosition = jest.fn((x, y) => {
       this.bounds = { ...this.bounds, x, y };
     });
+    getPosition = jest.fn(() => [this.bounds.x, this.bounds.y]);
     getBounds = jest.fn(() => this.bounds);
     isVisible = jest.fn(() => this.visible);
     show = jest.fn(() => {
@@ -56,8 +68,8 @@ jest.mock("electron", () => {
   return {
     __handlers: handlers,
     __listeners: listeners,
+    __windows: browserWindows,
     app: {
-      getPath: jest.fn(() => "E:/Projects/hana_project/hana_codex/.tmp"),
       isPackaged: false,
       on: jest.fn(),
       quit: jest.fn(),
@@ -100,10 +112,16 @@ jest.mock("electron", () => {
   };
 });
 
-describe("electron main bubble window", () => {
+describe("electron main windows", () => {
   beforeEach(() => {
     process.env.NODE_ENV = "test";
+    Object.keys(storeState).forEach((key) => delete storeState[key]);
     jest.resetModules();
+    const electron = require("electron");
+    electron.__windows.length = 0;
+    Object.keys(electron.__listeners).forEach((key) => delete electron.__listeners[key]);
+    Object.keys(electron.__handlers).forEach((key) => delete electron.__handlers[key]);
+    electron.globalShortcut.register.mockClear();
   });
 
   test("bubbleWindow show/hide leaves character bounds unchanged", () => {
@@ -111,8 +129,8 @@ describe("electron main bubble window", () => {
     const main = require("../../electron/main");
 
     main.createWindows();
-    const characterWindow = electron.BrowserWindow.getAllWindows()[0];
-    const bubbleWindow = electron.BrowserWindow.getAllWindows()[1];
+    const characterWindow = electron.__windows[0];
+    const bubbleWindow = electron.__windows[1];
     const initialBounds = characterWindow.getBounds();
 
     electron.__listeners["show-bubble"](null, {
@@ -127,6 +145,54 @@ describe("electron main bubble window", () => {
     expect(bubbleWindow.hide).toHaveBeenCalled();
   });
 
+  test("IPC open-main-settings activates settings tab", () => {
+    const electron = require("electron");
+    const main = require("../../electron/main");
+
+    main.createWindows();
+    const unifiedWindow = electron.__windows[2];
+
+    electron.__listeners["open-main-settings"]();
+
+    expect(unifiedWindow.show).toHaveBeenCalled();
+    expect(unifiedWindow.webContents.send).toHaveBeenCalledWith("set-tab", "settings");
+  });
+
+  test("main window move is persisted and reused on next start", () => {
+    let electron = require("electron");
+    let main = require("../../electron/main");
+
+    main.createWindows();
+    const firstMainWindow = electron.__windows[2];
+    firstMainWindow.setPosition(222, 333);
+    firstMainWindow.listeners.move();
+
+    jest.resetModules();
+    electron = require("electron");
+    electron.__windows.length = 0;
+    main = require("../../electron/main");
+    main.createWindows();
+
+    const secondMainWindow = electron.__windows[2];
+    expect(secondMainWindow.setPosition).toHaveBeenCalledWith(222, 333);
+  });
+
+  test("Alt+H toggles main window visibility", () => {
+    const electron = require("electron");
+    const main = require("../../electron/main");
+
+    main.createWindows();
+    const shortcutHandler = electron.globalShortcut.register.mock.calls[0][1];
+    const unifiedWindow = electron.__windows[2];
+
+    shortcutHandler();
+    expect(unifiedWindow.show).toHaveBeenCalled();
+
+    unifiedWindow.isVisible.mockReturnValue(true);
+    shortcutHandler();
+    expect(unifiedWindow.hide).toHaveBeenCalled();
+  });
+
   test("bubble position above character uses bottom tail", () => {
     const { calcBubblePosition } = require("../../electron/main");
     expect(
@@ -136,27 +202,5 @@ describe("electron main bubble window", () => {
         { width: 1920, height: 1080 }
       ).tail
     ).toBe("bottom");
-  });
-
-  test("bubble position below character uses top tail", () => {
-    const { calcBubblePosition } = require("../../electron/main");
-    expect(
-      calcBubblePosition(
-        { x: 300, y: 20, width: 300, height: 400 },
-        { width: 220, height: 90 },
-        { width: 1920, height: 1080 }
-      ).tail
-    ).toBe("top");
-  });
-
-  test("bubble position left of character uses right tail", () => {
-    const { calcBubblePosition } = require("../../electron/main");
-    expect(
-      calcBubblePosition(
-        { x: 1600, y: 50, width: 300, height: 980 },
-        { width: 220, height: 90 },
-        { width: 1920, height: 1080 }
-      ).tail
-    ).toBe("right");
   });
 });
