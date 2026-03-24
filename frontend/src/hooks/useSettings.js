@@ -198,6 +198,7 @@ export default function useSettings() {
 
     if (next.character.modelId && next.character.modelId !== saved?.character?.modelId) {
       await selectModel(next.character.modelId);
+      await window.__characterRenderer?._loadContext?.(next.character.modelId);
     }
 
     if (next.aiModel.chatModelId && next.aiModel.chatModelId !== saved?.aiModel?.chatModelId) {

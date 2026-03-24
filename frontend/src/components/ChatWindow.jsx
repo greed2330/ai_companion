@@ -4,6 +4,9 @@ import { streamChat } from "../services/chat";
 import { submitFeedback } from "../services/feedback";
 import { OUTPUT_MODES } from "../constants/outputModes";
 import { useOutputMode } from "../hooks/useOutputMode";
+import { useMotionStream } from "../hooks/useMotionStream";
+import { sttService } from "../services/stt";
+import "../services/lipsync";
 
 const ROOM_CONFIG = {
   general: { label: "일반 대화", icon: "🗨", interactionType: "general" },
@@ -27,11 +30,14 @@ function ChatWindow({
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isRec, setIsRec] = useState(false);
   const [error, setError] = useState("");
   const [feedbackState, setFeedbackState] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const endRef = useRef(null);
   const { handleResponse } = useOutputMode(settings);
+
+  useMotionStream(conversationId);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -44,14 +50,14 @@ function ChatWindow({
 
     try {
       await submitFeedback(messageId, score);
-      setFeedbackState((prev) => ({ ...prev, [messageId]: score }));
+      setFeedbackState((current) => ({ ...current, [messageId]: score }));
     } catch (feedbackError) {
       setError(feedbackError.message);
     }
   }
 
-  async function submitMessage() {
-    const trimmed = input.trim();
+  async function submitMessage(rawInput = input, audioFeatures = null) {
+    const trimmed = rawInput.trim();
     if (!trimmed || isStreaming) {
       return;
     }
@@ -66,9 +72,13 @@ function ChatWindow({
     setError("");
     setInput("");
     setIsStreaming(true);
-    setMessages((prev) => {
+    window.__pendingTTSParams = audioFeatures
+      ? { ...(window.__pendingTTSParams || {}), audioFeatures }
+      : window.__pendingTTSParams || {};
+
+    setMessages((current) => {
       const next = [
-        ...prev,
+        ...current,
         { id: `user-${Date.now()}`, role: "user", content: trimmed }
       ];
 
@@ -92,8 +102,8 @@ function ChatWindow({
             return;
           }
 
-          setMessages((prev) =>
-            prev.map((message) =>
+          setMessages((current) =>
+            current.map((message) =>
               message.id === assistantId
                 ? { ...message, content: `${message.content}${token}` }
                 : message
@@ -106,8 +116,8 @@ function ChatWindow({
           onMoodChange(nextMood);
 
           if (shouldRenderInChat) {
-            setMessages((prev) =>
-              prev.map((message) =>
+            setMessages((current) =>
+              current.map((message) =>
                 message.id === assistantId
                   ? {
                       ...message,
@@ -125,8 +135,8 @@ function ChatWindow({
             window.__pendingTTSParams || {},
             (text) => {
               if (!shouldRenderInChat) {
-                setMessages((prev) => [
-                  ...prev,
+                setMessages((current) => [
+                  ...current,
                   {
                     id: event.message_id || assistantId,
                     role: "assistant",
@@ -152,6 +162,21 @@ function ChatWindow({
       event.preventDefault();
       submitMessage();
     }
+  }
+
+  async function handleVoice() {
+    if (isRec) {
+      setIsRec(false);
+      const { text, audio_features: audioFeatures } = await sttService.stop();
+      if (text.trim()) {
+        setInput(text);
+        await submitMessage(text, audioFeatures);
+      }
+      return;
+    }
+
+    setIsRec(true);
+    await sttService.start();
   }
 
   function handleRoomSelect(room) {
@@ -196,7 +221,7 @@ function ChatWindow({
                 </button>
               ))}
             </div>
-            <div className="chat-sidebar__history">대화 기록은 다음 단계에서 연결돼.</div>
+            <div className="chat-sidebar__history">대화 기록은 다음 단계에서 연결됨</div>
           </aside>
         </>
       ) : null}
@@ -261,14 +286,18 @@ function ChatWindow({
           disabled={isStreaming}
         />
         <button
-          disabled
-          title="음성 입력 (Phase 4.5)"
+          aria-label="voice-input"
+          onClick={handleVoice}
+          title={isRec ? "녹음 중 (클릭해서 종료)" : "음성 입력"}
           type="button"
-          style={{ cursor: "not-allowed", opacity: 0.4 }}
+          style={{
+            animation: isRec ? "pulse 1s infinite" : "none",
+            color: isRec ? "#ff8e8e" : "var(--text-muted)"
+          }}
         >
           🎙
         </button>
-        <button type="button" onClick={submitMessage} disabled={isStreaming}>
+        <button type="button" onClick={() => submitMessage()} disabled={isStreaming}>
           전송
         </button>
       </div>

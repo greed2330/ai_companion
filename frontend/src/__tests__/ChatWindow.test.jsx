@@ -5,6 +5,21 @@ jest.mock("../services/feedback", () => ({
   submitFeedback: jest.fn(() => Promise.resolve({ success: true }))
 }));
 
+jest.mock("../hooks/useMotionStream", () => ({
+  useMotionStream: jest.fn()
+}));
+
+jest.mock("../services/stt", () => ({
+  sttService: {
+    start: jest.fn(() => Promise.resolve()),
+    stop: jest.fn(() =>
+      Promise.resolve({ text: "음성 입력", audio_features: { energy: 0.5 } })
+    )
+  }
+}));
+
+const { sttService } = jest.requireMock("../services/stt");
+
 function createSseResponse(chunks) {
   const encoder = new TextEncoder();
   const encoded = chunks.map((chunk) => encoder.encode(chunk));
@@ -54,13 +69,13 @@ describe("ChatWindow", () => {
   });
 
   afterEach(() => {
-    jest.resetAllMocks();
+    jest.clearAllMocks();
   });
 
   test("renders input and send button, submits on Enter", async () => {
     fetch.mockResolvedValue(
       createSseResponse([
-        'data: {"type":"token","content":"하"}\n',
+        'data: {"type":"token","content":"hi"}\n',
         'data: {"type":"done","message_id":"m1","conversation_id":"c1","mood":"IDLE"}\n',
         "data: [DONE]\n"
       ])
@@ -102,7 +117,7 @@ describe("ChatWindow", () => {
     window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
     fetch.mockResolvedValue(
       createSseResponse([
-        'data: {"type":"token","content":"안"}\n',
+        'data: {"type":"token","content":"hi"}\n',
         'data: {"type":"done","message_id":"m2","conversation_id":"c2","mood":"HAPPY"}\n',
         "data: [DONE]\n"
       ])
@@ -120,7 +135,7 @@ describe("ChatWindow", () => {
   test("voice mode sends voice_mode:true", async () => {
     fetch.mockResolvedValue(
       createSseResponse([
-        'data: {"type":"token","content":"안"}\n',
+        'data: {"type":"token","content":"hi"}\n',
         'data: {"type":"done","message_id":"m3","conversation_id":"c3","mood":"HAPPY"}\n',
         "data: [DONE]\n"
       ])
@@ -128,11 +143,21 @@ describe("ChatWindow", () => {
 
     renderChatWindow({ settings: { inputMode: "voice", outputMode: "chat" } });
     fireEvent.change(screen.getByLabelText("message-input"), {
-      target: { value: "음성 테스트" }
+      target: { value: "voice test" }
     });
     fireEvent.click(screen.getByRole("button", { name: "전송" }));
 
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     expect(fetch.mock.calls[0][1].body).toContain('"voice_mode":true');
+  });
+
+  test("voice button records and toggles active style", async () => {
+    renderChatWindow();
+
+    fireEvent.click(screen.getByRole("button", { name: "voice-input" }));
+    expect(sttService.start).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "voice-input" })).toHaveStyle(
+      "animation: pulse 1s infinite"
+    );
   });
 });

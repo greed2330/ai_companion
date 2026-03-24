@@ -49,6 +49,7 @@ function CharacterScreen() {
   return (
     <CharacterOverlay
       mood={mood}
+      modelId={activeModel?.id || ""}
       modelName={activeModel?.name || "하나"}
       modelPath={activeModel?.path || ""}
     />

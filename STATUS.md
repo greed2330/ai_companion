@@ -160,11 +160,11 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Codex만 수정합니다.
 
 ```
-현재 작업 브랜치: codex/phase3-ux-c
+현재 작업 브랜치: codex/phase3-ux-d
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 3-C settings tab full implementation 완료. settings accordion + pending/saved state + persona/autonomous/integrations/voice/app settings UI + output mode 처리 + 테스트/빌드 검증 완료 (2026-03-24)
+마지막 완료: Phase 3-D STT + TTS + generative character motion system 완료. STT/TTS/lipsync/characterController/useMotionStream + ChatWindow/CharacterOverlay 연동 + 테스트/빌드 검증 완료 (2026-03-24)
 블로커: 없음
-다음 작업: dev PR 생성 대기. Handoff: "Phase 3 UX complete. /settings/integrations UI done needs PROMPT_06 backend. /settings/autonomous UI done needs PROMPT_04-6B backend. outputModes.js + useOutputMode.js ready for 05-D."
+다음 작업: dev PR 생성 대기. Handoff: "Phase 3-D complete. Generative motion: characterController.js (motion_sequence JSON). STT: sttService. TTS: ttsService. Lipsync: lipSyncService. Needs GET /settings/models/current-context from PROMPT_04-6B."
 ```
 
 **완료된 태스크:**

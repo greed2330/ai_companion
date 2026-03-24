@@ -14,8 +14,9 @@ import {
   ZONE_REACTIONS
 } from "./character/interactionUtils";
 import { requestReactionBubble } from "../services/reactions";
+import { characterController } from "../services/characterController";
 
-function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
+function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하나" }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const dragRef = useRef(null);
@@ -52,15 +53,20 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
             window.hanaDesktop?.resolveAssetUrl?.(relativePath) || ""
         );
         rendererRef.current = instance;
+        if (instance) {
+          await characterController.init(instance, modelId);
+        }
         setHasRenderableModel(Boolean(instance));
-      } catch (error) {
+      } catch {
         rendererRef.current?.cleanup?.();
+        characterController.detach();
         rendererRef.current = null;
         setHasRenderableModel(false);
       }
     }
 
     rendererRef.current?.cleanup?.();
+    characterController.detach();
     rendererRef.current = null;
     if (containerRef.current) {
       containerRef.current.innerHTML = "";
@@ -68,10 +74,11 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
     mountModel();
 
     return () => {
+      characterController.detach();
       rendererRef.current?.cleanup?.();
       rendererRef.current = null;
     };
-  }, [modelPath]);
+  }, [modelId, modelPath]);
 
   useEffect(() => {
     applyMood(rendererRef.current, mood);
@@ -136,12 +143,16 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
     pettingTracker.update({ movementX: event.movementX, zone });
 
     window.hanaDesktop?.getCharacterBounds?.().then((charBounds) => {
-      const gaze = getGazeOffset(event.screenX, event.screenY, charBounds || {
-        x: 0,
-        y: 0,
-        width: bounds.width,
-        height: bounds.height
-      });
+      const gaze = getGazeOffset(
+        event.screenX,
+        event.screenY,
+        charBounds || {
+          x: 0,
+          y: 0,
+          width: bounds.width,
+          height: bounds.height
+        }
+      );
       applyGaze(rendererRef.current, gaze.x, gaze.y);
     });
 
@@ -248,10 +259,7 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
         </div>
       </div>
       {menuState.open ? (
-        <div
-          className="character-menu"
-          style={{ left: menuState.x, top: menuState.y }}
-        >
+        <div className="character-menu" style={{ left: menuState.x, top: menuState.y }}>
           <button type="button" onClick={() => window.hanaDesktop?.showChatWindow?.()}>
             채팅 열기
           </button>
@@ -272,6 +280,7 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
 
 CharacterOverlay.propTypes = {
   mood: PropTypes.string.isRequired,
+  modelId: PropTypes.string,
   modelPath: PropTypes.string,
   modelName: PropTypes.string
 };

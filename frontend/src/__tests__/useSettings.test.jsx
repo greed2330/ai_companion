@@ -37,6 +37,16 @@ jest.mock("../services/settings", () => ({
 const settingsApi = jest.requireMock("../services/settings");
 
 describe("useSettings", () => {
+  beforeEach(() => {
+    window.__characterRenderer = {
+      _loadContext: jest.fn(() => Promise.resolve())
+    };
+  });
+
+  afterEach(() => {
+    delete window.__characterRenderer;
+  });
+
   test("confirm saves persona and output mode", async () => {
     const { result } = renderHook(() => useSettings());
     await waitFor(() => expect(result.current.saved).not.toBeNull());
@@ -84,5 +94,21 @@ describe("useSettings", () => {
     });
 
     expect(result.current.saved).toEqual(DEFAULT_SETTINGS);
+  });
+
+  test("refreshes model context after confirmed model change", async () => {
+    const { result } = renderHook(() => useSettings());
+    await waitFor(() => expect(result.current.saved).not.toBeNull());
+
+    act(() => {
+      result.current.updatePending("character", { modelId: "nanoka" });
+    });
+
+    await act(async () => {
+      await result.current.handleConfirm();
+    });
+
+    expect(settingsApi.selectModel).toHaveBeenCalledWith("nanoka");
+    expect(window.__characterRenderer._loadContext).toHaveBeenCalledWith("nanoka");
   });
 });
