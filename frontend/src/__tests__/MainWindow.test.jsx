@@ -22,7 +22,7 @@ jest.mock("../hooks/useSettings", () =>
         google_calendar: { status: "grey", apiKey: "" },
         github: { status: "grey", apiKey: "" }
       },
-      character: { modelId: "furina", modelType: "PMX", viewportScale: 100 },
+      character: { modelId: "furina", modelType: "pmx", viewportScale: 100 },
       aiModel: { chatModelId: "qwen3:14b", status: "연결됨" },
       app: { theme: "dark-anime", shortcut: "Alt+H", autoLaunch: false }
     },
@@ -80,16 +80,14 @@ describe("MainWindow", () => {
     act(() => {
       window.__roomChangeHandler({
         room_type: "coding",
-        message: "코딩 대화로 바꿀게~"
+        message: "코딩 대화로 바꿀게."
       });
     });
 
-    await waitFor(() =>
-      expect(screen.getByText("코딩")).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByText("코딩")).toBeInTheDocument());
     expect(window.hanaDesktop.showBubble).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: "코딩 대화로 바꿀게~",
+        message: "코딩 대화로 바꿀게.",
         mood: "CURIOUS",
         type: "alert"
       })
@@ -105,13 +103,11 @@ describe("MainWindow", () => {
     act(() => {
       window.__roomChangeHandler({
         room_type: "game",
-        message: "게임 대화로 바꿀게~"
+        message: "게임 대화로 바꿀게."
       });
     });
 
-    await waitFor(() =>
-      expect(screen.getByText("코딩")).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByText("코딩")).toBeInTheDocument());
     expect(screen.queryByText("게임")).not.toBeInTheDocument();
   });
 });

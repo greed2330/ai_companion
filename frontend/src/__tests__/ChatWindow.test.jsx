@@ -156,8 +156,8 @@ describe("ChatWindow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "voice-input" }));
     expect(sttService.start).toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "voice-input" })).toHaveStyle(
-      "animation: pulse 1s infinite"
+    expect(screen.getByRole("button", { name: "voice-input" })).toHaveClass(
+      "is-recording"
     );
   });
 });

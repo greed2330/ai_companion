@@ -14,7 +14,7 @@ import { OUTPUT_MODES } from "../constants/outputModes";
 export const DEFAULT_SETTINGS = {
   character: {
     modelId: "",
-    modelType: "Live2D",
+    modelType: "live2d",
     viewportScale: 100
   },
   persona: {
@@ -50,7 +50,7 @@ export const DEFAULT_SETTINGS = {
   },
   integrations: {
     serper: { status: "grey", apiKey: "" },
-    google_calendar: { status: "grey", apiKey: "", note: "credentials.json 필요" },
+    google_calendar: { status: "grey", apiKey: "", note: "credentials.json이 필요해요." },
     github: { status: "grey", apiKey: "" }
   },
   voice: {
@@ -119,19 +119,14 @@ export default function useSettings() {
   useEffect(() => {
     async function load() {
       try {
-        const [
-          persona,
-          autonomous,
-          characterModelsPayload,
-          llmModelsPayload,
-          appSettings
-        ] = await Promise.all([
-          fetchPersona(),
-          fetchAutonomous(),
-          fetchModels(),
-          fetchLlmModels(),
-          window.hanaDesktop?.getAppSettings?.() || {}
-        ]);
+        const [persona, autonomous, characterModelsPayload, llmModelsPayload, appSettings] =
+          await Promise.all([
+            fetchPersona(),
+            fetchAutonomous(),
+            fetchModels(),
+            fetchLlmModels(),
+            window.hanaDesktop?.getAppSettings?.() || {}
+          ]);
 
         const currentCharacter =
           characterModelsPayload.models?.find(
@@ -141,7 +136,7 @@ export default function useSettings() {
         const nextSaved = mergeDeep(DEFAULT_SETTINGS, {
           character: {
             modelId: currentCharacter?.id || "",
-            modelType: currentCharacter?.type?.toUpperCase() || "Live2D"
+            modelType: currentCharacter?.type || "live2d"
           },
           persona,
           aiModel: {

@@ -6,8 +6,8 @@ import useMoodStream from "../hooks/useMoodStream";
 import useSettings from "../hooks/useSettings";
 
 const TABS = [
-  { id: "chat", label: "채팅" },
-  { id: "settings", label: "설정" }
+  { id: "chat", label: "채팅", description: "대화, 리액션, 최근 흐름을 확인해요." },
+  { id: "settings", label: "설정", description: "캐릭터와 앱 동작 방식을 다듬어요." }
 ];
 
 function MainWindow() {
@@ -48,10 +48,19 @@ function MainWindow() {
     return () => unsubscribe?.();
   }, []);
 
+  const aiName = settingsState.effective.persona.ai_name || "하나";
+  const activeTabMeta = TABS.find((tab) => tab.id === activeTab) || TABS[0];
+
   return (
     <section className="main-window" data-testid="main-window">
       <header className="main-window__header">
-        <strong>{settingsState.effective.persona.ai_name || "하나"}</strong>
+        <div className="main-window__brand">
+          <span className="main-window__eyebrow">HANA companion</span>
+          <div>
+            <strong>{aiName}</strong>
+            <p>{activeTabMeta.description}</p>
+          </div>
+        </div>
         <div className="window-controls">
           <button
             type="button"
@@ -80,12 +89,13 @@ function MainWindow() {
             className={`main-window__tab ${activeTab === tab.id ? "is-active" : ""}`}
             onClick={() => setActiveTab(tab.id)}
           >
-            {tab.label}
+            <span>{tab.label}</span>
+            <small>{tab.description}</small>
           </button>
         ))}
       </nav>
 
-      <div className="main-window__content">
+      <section className="main-window__stage">
         {activeTab === "chat" ? (
           <ChatWindow
             autoRoom={autoRoom}
@@ -106,7 +116,7 @@ function MainWindow() {
         ) : (
           <Settings settingsState={settingsState} />
         )}
-      </div>
+      </section>
     </section>
   );
 }

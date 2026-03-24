@@ -1,7 +1,6 @@
 const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
-const Store = require("electron-store");
 const {
   app,
   BrowserWindow,
@@ -13,7 +12,7 @@ const {
   Tray
 } = require("electron");
 
-const store = new Store();
+let store = null;
 const DEFAULT_SHORTCUT = "Alt+H";
 const DEFAULT_APP_SETTINGS = {
   app: {
@@ -52,6 +51,21 @@ let mainWindow = null;
 let tray = null;
 let ipcRegistered = false;
 let shortcutsRegistered = false;
+
+if (process.env.NODE_ENV === "test") {
+  const Store = require("electron-store");
+  store = new Store();
+}
+
+async function initializeStore() {
+  if (store) {
+    return store;
+  }
+
+  const { default: Store } = await import("electron-store");
+  store = new Store();
+  return store;
+}
 
 function getRendererEntry(route) {
   if (!app.isPackaged) {
@@ -482,7 +496,8 @@ function createWindows() {
 }
 
 if (process.env.NODE_ENV !== "test") {
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    await initializeStore();
     createWindows();
 
     app.on("activate", () => {

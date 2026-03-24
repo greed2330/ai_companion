@@ -10,7 +10,7 @@ jest.mock("../services/settings", () => ({
 function createSettingsState() {
   return {
     effective: {
-      character: { modelId: "furina", modelType: "PMX", viewportScale: 100 },
+      character: { modelId: "furina", modelType: "pmx", viewportScale: 100 },
       persona: {
         ai_name: "하나",
         owner_nickname: "",
@@ -70,41 +70,42 @@ function createSettingsState() {
 }
 
 describe("Settings", () => {
-  test("accordion toggles section body", () => {
+  test("section nav switches visible detail panel", () => {
     const state = createSettingsState();
     render(<Settings settingsState={state} />);
 
-    expect(screen.getByLabelText("character-model")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "캐릭터" }));
-    expect(screen.queryByLabelText("character-model")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("character-model-grid")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /AI & 모델/ }));
+    expect(screen.getByLabelText("chat-model-grid")).toBeInTheDocument();
+    expect(screen.queryByLabelText("character-model-grid")).not.toBeInTheDocument();
   });
 
   test("confirm button delegates to handler", () => {
     const state = createSettingsState();
     render(<Settings settingsState={state} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "확인" }));
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
     expect(state.handleConfirm).toHaveBeenCalled();
   });
 
-  test("serper dependency disables background search", async () => {
+  test("serper dependency disables background search", () => {
     const state = createSettingsState();
     render(<Settings settingsState={state} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "자율 행동" }));
-    expect(await screen.findByText("Serper API 연결 필요")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /자율 행동/ }));
+    expect(screen.getByText("Serper API 연결 필요")).toBeInTheDocument();
   });
 
-  test("api key is masked by default and toggles visible", async () => {
+  test("api key is masked by default and toggles visible", () => {
     const state = createSettingsState();
     render(<Settings settingsState={state} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "외부 연동" }));
-    const input = await screen.findByLabelText("serper-key");
+    fireEvent.click(screen.getByRole("button", { name: /외부 연동/ }));
+    const input = screen.getByLabelText("serper-key");
     expect(input).toHaveValue("sk-1...5678");
 
     fireEvent.click(screen.getByRole("button", { name: "serper-toggle-visibility" }));
-    expect(input).toHaveValue("sk-12345678");
+    expect(screen.getByLabelText("serper-key")).toHaveValue("sk-12345678");
   });
 
   test("integration test shows loading then fallback failure", async () => {
@@ -112,8 +113,8 @@ describe("Settings", () => {
     global.fetch = jest.fn(() => Promise.reject(new Error("offline")));
     render(<Settings settingsState={state} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "외부 연동" }));
-    fireEvent.click((await screen.findAllByRole("button", { name: "연결" }))[0]);
+    fireEvent.click(screen.getByRole("button", { name: /외부 연동/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: "연결" })[0]);
 
     await waitFor(() => expect(screen.getByText("서버 연결 실패")).toBeInTheDocument());
   });
@@ -122,11 +123,9 @@ describe("Settings", () => {
     const state = createSettingsState();
     render(<Settings settingsState={state} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "AI & 모델" }));
-    fireEvent.click(await screen.findByRole("button", { name: "미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: /AI & 모델/ }));
+    fireEvent.click(screen.getByRole("button", { name: "미리보기" }));
 
-    await waitFor(() =>
-      expect(state.setMeta).toHaveBeenCalled()
-    );
+    await waitFor(() => expect(state.setMeta).toHaveBeenCalled());
   });
 });

@@ -437,3 +437,45 @@ Frontend status relevant to this handoff:
 - Live2D renderer path exists and requires local `assets/live2d/live2dcubismcore.min.js`.
 - Chat/settings windows now have custom drag/minimize/maximize-close controls because they are frameless Electron windows.
 - Character model selection is also broadcast locally so the overlay can refresh even when SSE falls back temporarily.
+
+---
+
+## Codex Update - 2026-03-25
+
+Branch: `codex/phase3-ux-d`
+
+- Settings UI was reworked into a product-style layout:
+  - left section navigation
+  - right detail panel
+  - fixed bottom action bar
+  - right-panel-only scrolling
+- MainWindow, ChatWindow, and Settings labels were cleaned up to remove broken text rendering.
+- Character settings now surface current model state and viewport controls more clearly.
+- Frontend validation after the UI rework:
+  - `npm test -- --runInBand` passed
+  - `npm run build` passed
+- Local note:
+  - `frontend/electron/main.js` still contains the uncommitted Electron Store ESM fix required for app startup.
+
+### Owner Feedback / Next Session Priority
+
+The following issues were reported by the owner and should be treated as first-priority follow-up work on the next session.
+
+1. Settings page UX is still below bar.
+- Current layout is neither a clean accordion nor a well-resolved sidebar/detail settings pattern.
+- Information hierarchy is weak, section boundaries are unclear, and the overall screen does not feel product-grade.
+- Sidebar itself is not scrollable.
+- Window size is fixed, which makes dense settings UI harder to use.
+- Button sizing and visual rhythm are too uniform, so the screen does not guide attention well.
+- Text blocks are too raw and uneven, causing section heights and density to feel inconsistent.
+- Next pass should focus on proper UX structure first, not just styling on top of the current layout.
+
+2. Character tip behavior is too frequent / always-on.
+- Tip bubbles should not feel like a 24-hour looping banner.
+- They should appear only occasionally and under explicit timing or situation rules.
+- Next pass should define concrete triggers, cooldowns, and suppression rules before adjusting presentation.
+
+3. Character positioning inside the viewport is not solved.
+- Owner cannot reliably reposition the character within the viewport when it is off-frame or poorly placed.
+- Requested capability: explicit in-viewport position adjustment, not just viewport scale.
+- Next pass should verify whether this capability exists at all; if not, add proper x/y offset controls and renderer application.
