@@ -43,8 +43,13 @@ jest.mock("electron", () => {
     setPosition = jest.fn((x, y) => {
       this.bounds = { ...this.bounds, x, y };
     });
+    setSize = jest.fn((width, height) => {
+      this.bounds = { ...this.bounds, width, height };
+    });
+    setOpacity = jest.fn();
     getPosition = jest.fn(() => [this.bounds.x, this.bounds.y]);
     getBounds = jest.fn(() => this.bounds);
+    getSize = jest.fn(() => [this.bounds.width, this.bounds.height]);
     isVisible = jest.fn(() => this.visible);
     show = jest.fn(() => {
       this.visible = true;

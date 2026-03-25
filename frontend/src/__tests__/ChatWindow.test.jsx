@@ -1,20 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ChatWindow from "../components/ChatWindow";
 
-jest.mock("../services/feedback", () => ({
-  submitFeedback: jest.fn(() => Promise.resolve({ success: true }))
-}));
-
-jest.mock("../hooks/useMotionStream", () => ({
-  useMotionStream: jest.fn()
-}));
-
+jest.mock("../services/feedback", () => ({ submitFeedback: jest.fn(() => Promise.resolve({ success: true })) }));
+jest.mock("../hooks/useMotionStream", () => ({ useMotionStream: jest.fn() }));
 jest.mock("../services/stt", () => ({
   sttService: {
     start: jest.fn(() => Promise.resolve()),
-    stop: jest.fn(() =>
-      Promise.resolve({ text: "음성 입력", audio_features: { energy: 0.5 } })
-    )
+    stop: jest.fn(() => Promise.resolve({ text: "voice input", audio_features: { energy: 0.5 } }))
   }
 }));
 
@@ -24,17 +16,13 @@ function createSseResponse(chunks) {
   const encoder = new TextEncoder();
   const encoded = chunks.map((chunk) => encoder.encode(chunk));
   let index = 0;
-
   return {
     ok: true,
     body: {
       getReader() {
         return {
           async read() {
-            if (index >= encoded.length) {
-              return { done: true, value: undefined };
-            }
-
+            if (index >= encoded.length) return { done: true, value: undefined };
             const value = encoded[index];
             index += 1;
             return { done: false, value };
@@ -68,9 +56,7 @@ describe("ChatWindow", () => {
     window.HTMLElement.prototype.scrollIntoView = jest.fn();
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
+  afterEach(() => jest.clearAllMocks());
 
   test("renders input and send button, submits on Enter", async () => {
     fetch.mockResolvedValue(
@@ -82,18 +68,15 @@ describe("ChatWindow", () => {
     );
 
     renderChatWindow();
-    fireEvent.change(screen.getByLabelText("message-input"), {
-      target: { value: "테스트" }
-    });
+    fireEvent.change(screen.getByLabelText("message-input"), { target: { value: "test" } });
     fireEvent.keyDown(screen.getByLabelText("message-input"), { key: "Enter" });
 
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("button", { name: "전송" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
   });
 
   test("sidebar opens and closes on outside click", () => {
     renderChatWindow();
-
     fireEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
     expect(screen.getByTestId("chat-sidebar")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "sidebar-backdrop" }));
@@ -106,7 +89,7 @@ describe("ChatWindow", () => {
     renderChatWindow({ onAutoRoomChange, onRoomChange });
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
-    fireEvent.click(screen.getByRole("button", { name: /코딩/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /Coding/i })[0]);
 
     expect(onRoomChange).toHaveBeenCalledWith("coding");
     expect(onAutoRoomChange).toHaveBeenCalledWith(false);
@@ -124,10 +107,8 @@ describe("ChatWindow", () => {
     );
 
     renderChatWindow();
-    fireEvent.change(screen.getByLabelText("message-input"), {
-      target: { value: "안녕" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: "전송" }));
+    fireEvent.change(screen.getByLabelText("message-input"), { target: { value: "hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
   });
@@ -142,10 +123,8 @@ describe("ChatWindow", () => {
     );
 
     renderChatWindow({ settings: { inputMode: "voice", outputMode: "chat" } });
-    fireEvent.change(screen.getByLabelText("message-input"), {
-      target: { value: "voice test" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: "전송" }));
+    fireEvent.change(screen.getByLabelText("message-input"), { target: { value: "voice test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     expect(fetch.mock.calls[0][1].body).toContain('"voice_mode":true');
@@ -153,11 +132,8 @@ describe("ChatWindow", () => {
 
   test("voice button records and toggles active style", async () => {
     renderChatWindow();
-
     fireEvent.click(screen.getByRole("button", { name: "voice-input" }));
     expect(sttService.start).toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "voice-input" })).toHaveClass(
-      "is-recording"
-    );
+    expect(screen.getByRole("button", { name: "voice-input" })).toHaveClass("is-recording");
   });
 });

@@ -9,11 +9,17 @@ import { sttService } from "../services/stt";
 import "../services/lipsync";
 
 const ROOM_CONFIG = {
-  general: { label: "일반 대화", icon: "🗨", interactionType: "general" },
-  coding: { label: "코딩", icon: "💻", interactionType: "coding" },
-  game: { label: "게임", icon: "🎮", interactionType: "game" },
-  free: { label: "자유", icon: "✦", interactionType: "free" }
+  general: { label: "General", hint: "Everyday chat", interactionType: "chat" },
+  coding: { label: "Coding", hint: "Debug and build", interactionType: "coding" },
+  game: { label: "Game", hint: "Game reactions", interactionType: "game" },
+  free: { label: "Free", hint: "Anything else", interactionType: "chat" },
 };
+
+const STARTERS = [
+  "오늘 뭐부터 해야 할지 정리해줘",
+  "지금 에러 원인부터 같이 보자",
+  "조금 더 집중된 톤으로 바꿔줘",
+];
 
 function ChatWindow({
   autoRoom,
@@ -24,7 +30,7 @@ function ChatWindow({
   onNewConversation,
   onRoomChange,
   onRoomEvent,
-  settings
+  settings,
 }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
@@ -40,7 +46,7 @@ function ChatWindow({
   useMotionStream(conversationId);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
   async function handleFeedback(messageId, score) {
@@ -77,11 +83,9 @@ function ChatWindow({
 
     setMessages((current) => {
       const next = [...current, { id: `user-${Date.now()}`, role: "user", content: trimmed }];
-
       if (shouldRenderInChat) {
         next.push({ id: assistantId, role: "assistant", content: "", mood: "IDLE" });
       }
-
       return next;
     });
 
@@ -93,7 +97,6 @@ function ChatWindow({
         voiceMode,
         onToken: (token) => {
           assistantContent += token;
-
           if (!shouldRenderInChat) {
             return;
           }
@@ -133,14 +136,14 @@ function ChatWindow({
                     id: event.message_id || assistantId,
                     role: "assistant",
                     content: text,
-                    mood: nextMood
-                  }
+                    mood: nextMood,
+                  },
                 ]);
               }
             }
           );
         },
-        onRoomChange: onRoomEvent
+        onRoomChange: onRoomEvent,
       });
     } catch (streamError) {
       setError(streamError.message);
@@ -171,10 +174,56 @@ function ChatWindow({
     await sttService.start();
   }
 
-  function handleRoomSelect(room) {
+  function selectRoom(room) {
     onRoomChange(room);
     onAutoRoomChange(false);
     setSidebarOpen(false);
+  }
+
+  function renderRail() {
+    return (
+      <>
+        <div className="chat-sidebar__header">
+          <p className="chat-sidebar__eyebrow">Conversations</p>
+          <strong>웹 AI 채팅 레이아웃</strong>
+        </div>
+
+        <button
+          type="button"
+          className="button button--primary chat-sidebar__new"
+          onClick={() => {
+            onNewConversation();
+            setConversationId(null);
+            setMessages([]);
+            setSidebarOpen(false);
+          }}
+        >
+          New chat
+        </button>
+
+        <div className="chat-sidebar__rooms">
+          {Object.entries(ROOM_CONFIG).map(([room, config]) => (
+            <button
+              key={room}
+              type="button"
+              className={`chat-sidebar__room ${currentRoom === room ? "is-active" : ""}`}
+              onClick={() => selectRoom(room)}
+            >
+              <strong>{config.label}</strong>
+              <span>{config.hint}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="chat-sidebar__footer">
+          <div className="chat-sidebar__status">
+            <span className="mood-indicator__dot" />
+            <strong>{currentMood}</strong>
+          </div>
+          <p>{autoRoom ? "Auto routing is enabled." : "Room is pinned manually."}</p>
+        </div>
+      </>
+    );
   }
 
   return (
@@ -187,130 +236,142 @@ function ChatWindow({
             type="button"
             onClick={() => setSidebarOpen(false)}
           />
-          <aside className="chat-sidebar" data-testid="chat-sidebar">
-            <div className="chat-sidebar__header">
-              <p>대화 모드</p>
-              <strong>상황에 맞는 컨텍스트로 빠르게 전환해요.</strong>
-            </div>
-            <button
-              type="button"
-              className="chat-sidebar__new"
-              onClick={() => {
-                onNewConversation();
-                setConversationId(null);
-                setMessages([]);
-                setSidebarOpen(false);
-              }}
-            >
-              + 새 대화
-            </button>
-            <div className="chat-sidebar__rooms">
-              {Object.entries(ROOM_CONFIG).map(([room, config]) => (
-                <button
-                  key={room}
-                  type="button"
-                  className={`chat-sidebar__room ${currentRoom === room ? "is-active" : ""}`}
-                  onClick={() => handleRoomSelect(room)}
-                >
-                  <span className="chat-sidebar__icon">{config.icon}</span>
-                  <span>{config.label}</span>
-                </button>
-              ))}
-            </div>
-            <div className="chat-sidebar__history">
-              대화 기록 연결 UI는 다음 단계에서 이어집니다.
-            </div>
+          <aside className="chat-sidebar--drawer" data-testid="chat-sidebar">
+            {renderRail()}
           </aside>
         </>
       ) : null}
 
-      <div className="chat-window">
-        <div className="chat-window__toolbar">
-          <button
-            type="button"
-            className="chat-window__menu"
-            aria-label="Toggle sidebar"
-            onClick={() => setSidebarOpen((open) => !open)}
-          >
-            ☰
-          </button>
-          <div className="chat-window__meta">
-            <strong>{ROOM_CONFIG[currentRoom]?.label || ROOM_CONFIG.general.label}</strong>
-            <span>{autoRoom ? "자동 전환이 켜져 있어요." : "수동으로 방을 고정한 상태예요."}</span>
-          </div>
-          <div className="mood-indicator">
-            <span className="mood-indicator__dot" />
-            <span>{currentMood}</span>
-          </div>
-        </div>
+      <div className="chat-layout">
+        <aside className="chat-rail">{renderRail()}</aside>
 
-        <div className="messages" aria-label="chat-messages">
-          {messages.length === 0 ? (
-            <article className="chat-empty">
-              <h3>하나가 기다리고 있어요.</h3>
-              <p>코딩, 게임, 잡담 중 지금 필요한 흐름으로 바로 대화를 시작하면 됩니다.</p>
-            </article>
+        <div className="chat-window">
+          <header className="chat-window__header">
+            <div className="chat-window__left">
+              <button
+                type="button"
+                className="chat-window__menu"
+                aria-label="Toggle sidebar"
+                onClick={() => setSidebarOpen((open) => !open)}
+              >
+                ≡
+              </button>
+              <div className="chat-window__meta">
+                <span className="chat-window__eyebrow">Room</span>
+                <strong>{ROOM_CONFIG[currentRoom]?.label || ROOM_CONFIG.general.label}</strong>
+                <p>{autoRoom ? "Hana can reroute from system events." : "Manual room lock is active."}</p>
+              </div>
+            </div>
+
+            <div className="chat-window__chips">
+              <span className="chat-chip">{settings.inputMode}</span>
+              <span className="chat-chip">{settings.outputMode || OUTPUT_MODES.CHAT}</span>
+              <span className="chat-chip chat-chip--mood">{currentMood}</span>
+            </div>
+          </header>
+
+          <div className="messages" aria-label="chat-messages">
+            {messages.length === 0 ? (
+              <section className="chat-empty">
+                <div className="chat-empty__hero">
+                  <span className="chat-empty__eyebrow">Ready</span>
+                  <h3>Hana is ready.</h3>
+                  <p>레퍼런스 기반 셸 위에 실제 채팅 엔드포인트를 연결한 상태.</p>
+                </div>
+
+                <div className="starter-grid">
+                  {STARTERS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="starter-card"
+                      onClick={() => submitMessage(prompt)}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {messages.map((message) => (
+              <article key={message.id} className={`message-row message-row--${message.role}`}>
+                <div className={`message-avatar message-avatar--${message.role}`}>
+                  {message.role === "user" ? "U" : "H"}
+                </div>
+                <div className={`message-card message-card--${message.role}`}>
+                  <div className="message-card__meta">
+                    <strong>{message.role === "user" ? "You" : "HANA"}</strong>
+                    {message.role === "assistant" ? <span>{message.mood || currentMood}</span> : null}
+                  </div>
+
+                  <p>{message.content || (isStreaming ? "..." : "")}</p>
+
+                  {message.role === "assistant" && !message.id.startsWith("assistant-") ? (
+                    <div className="feedback-row">
+                      <button
+                        type="button"
+                        aria-label={`thumbs-up-${message.id}`}
+                        className={`feedback-chip ${feedbackState[message.id] === 5 ? "is-active" : ""}`}
+                        onClick={() => handleFeedback(message.id, 5)}
+                      >
+                        Helpful
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`thumbs-down-${message.id}`}
+                        className={`feedback-chip ${feedbackState[message.id] === 1 ? "is-active" : ""}`}
+                        onClick={() => handleFeedback(message.id, 1)}
+                      >
+                        Off
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+
+            <div ref={endRef} data-testid="messages-end" />
+          </div>
+
+          {error ? (
+            <p className="error-text" role="alert">
+              {error}
+            </p>
           ) : null}
 
-          {messages.map((message) => (
-            <article key={message.id} className={`message message--${message.role}`}>
-              <strong>{message.role === "user" ? "You" : "HANA"}</strong>
-              <p>{message.content}</p>
-              {message.role === "assistant" && !message.id.startsWith("assistant-") ? (
-                <div className="feedback-row">
-                  <button
-                    type="button"
-                    aria-label={`thumbs-up-${message.id}`}
-                    onClick={() => handleFeedback(message.id, 5)}
-                  >
-                    👍
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`thumbs-down-${message.id}`}
-                    onClick={() => handleFeedback(message.id, 1)}
-                  >
-                    👎
-                  </button>
-                </div>
-              ) : null}
-            </article>
-          ))}
-          <div ref={endRef} data-testid="messages-end" />
-        </div>
+          <footer className="composer-shell">
+            <div className="composer">
+              <input
+                aria-label="message-input"
+                className="composer__input"
+                placeholder="Message Hana..."
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isStreaming}
+              />
 
-        {error ? (
-          <p className="error-text" role="alert">
-            {error}
-          </p>
-        ) : null}
+              <button
+                aria-label="voice-input"
+                className={`button composer__voice ${isRec ? "is-recording" : ""}`}
+                onClick={handleVoice}
+                title={isRec ? "Recording. Click again to stop." : "Voice input"}
+                type="button"
+              >
+                Mic
+              </button>
 
-        <div className="composer">
-          <input
-            aria-label="message-input"
-            placeholder="메시지를 입력해 주세요."
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isStreaming}
-          />
-          <button
-            aria-label="voice-input"
-            className={`composer__voice ${isRec ? "is-recording" : ""}`}
-            onClick={handleVoice}
-            title={isRec ? "녹음 중이에요. 다시 누르면 종료돼요." : "음성 입력"}
-            type="button"
-          >
-            🎙
-          </button>
-          <button
-            type="button"
-            className="composer__send"
-            onClick={() => submitMessage()}
-            disabled={isStreaming}
-          >
-            전송
-          </button>
+              <button
+                type="button"
+                className="button button--primary composer__send"
+                onClick={() => submitMessage()}
+                disabled={isStreaming}
+              >
+                Send
+              </button>
+            </div>
+          </footer>
         </div>
       </div>
     </section>
@@ -328,8 +389,8 @@ ChatWindow.propTypes = {
   onRoomEvent: PropTypes.func.isRequired,
   settings: PropTypes.shape({
     inputMode: PropTypes.string.isRequired,
-    outputMode: PropTypes.string
-  }).isRequired
+    outputMode: PropTypes.string,
+  }).isRequired,
 };
 
 export { ROOM_CONFIG };

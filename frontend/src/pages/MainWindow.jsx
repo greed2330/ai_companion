@@ -1,123 +1,133 @@
-import { useEffect, useState } from "react";
-import ChatWindow from "../components/ChatWindow";
-import Settings from "../components/Settings";
-import useAfkDetection from "../hooks/useAfkDetection";
+import { useEffect, useMemo, useRef, useState } from "react";
+import ChatLayout from "../components/chat/ChatLayout";
+import SettingsLayout from "../components/settings/SettingsLayout";
 import useMoodStream from "../hooks/useMoodStream";
-import useSettings from "../hooks/useSettings";
+import useConversations from "../hooks/useConversations";
+import useChat from "../hooks/useChat";
 
 const TABS = [
-  { id: "chat", label: "채팅", description: "대화, 리액션, 최근 흐름을 확인해요." },
-  { id: "settings", label: "설정", description: "캐릭터와 앱 동작 방식을 다듬어요." }
+  { id: "chat", label: "채팅" },
+  { id: "settings", label: "설정" },
 ];
 
 function MainWindow() {
   const [activeTab, setActiveTab] = useState("chat");
   const [mood, setMood] = useState("IDLE");
-  const [currentRoom, setCurrentRoom] = useState("general");
-  const [autoRoom, setAutoRoom] = useState(true);
-  const [conversationSeed, setConversationSeed] = useState(0);
-  const settingsState = useSettings();
+  const [roomType, setRoomType] = useState("일반");
+  const [currentConversationId, setCurrentConversationId] = useState(null);
+  const [selectedConversationId, setSelectedConversationId] = useState(null);
+  const inputRef = useRef(null);
+  const { conversations, groupedConversations, refreshConversations } = useConversations();
 
-  function handleRoomChangeEvent(event) {
-    if (autoRoom && event?.room_type) {
-      setCurrentRoom(event.room_type);
-    }
-
-    if (event?.message) {
-      window.hanaDesktop?.showBubble?.({
-        message: event.message,
-        mood: "CURIOUS",
-        type: "alert"
-      });
-    }
-  }
-
-  useMoodStream({
+  const { mode } = useMoodStream({
     onMoodChange: setMood,
     onModelChange: () => {},
-    onRoomChange: handleRoomChangeEvent
+    onRoomChange: (event) => {
+      if (event?.room_type) {
+        setRoomType(event.room_type);
+      }
+    },
   });
 
-  useAfkDetection({ setMood });
+  const chat = useChat(currentConversationId, {
+    onConversationCreated: (conversationId) => {
+      setCurrentConversationId(conversationId);
+      setSelectedConversationId(conversationId);
+      refreshConversations();
+    },
+    onRoomChange: (nextRoomType) => setRoomType(nextRoomType || "일반"),
+    onMessagePersisted: refreshConversations,
+  });
 
   useEffect(() => {
     const unsubscribe = window.hanaDesktop?.onSetTab?.((tab) => {
       setActiveTab(tab || "chat");
     });
-
     return () => unsubscribe?.();
   }, []);
 
-  const aiName = settingsState.effective.persona.ai_name || "하나";
-  const activeTabMeta = TABS.find((tab) => tab.id === activeTab) || TABS[0];
+  const activeConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === currentConversationId) || null,
+    [conversations, currentConversationId]
+  );
 
   return (
-    <section className="main-window" data-testid="main-window">
-      <header className="main-window__header">
-        <div className="main-window__brand">
-          <span className="main-window__eyebrow">HANA companion</span>
-          <div>
-            <strong>{aiName}</strong>
-            <p>{activeTabMeta.description}</p>
-          </div>
+    <div className="main-window" data-testid="main-window">
+      <div className="titlebar">
+        <div className="titlebar-left">
+          <div className="titlebar-dot" />
+          <span className="titlebar-title">HANA COMPANION</span>
         </div>
-        <div className="window-controls">
+        <div className="titlebar-controls">
           <button
+            aria-label="window-minimize"
+            className="ctrl-btn"
             type="button"
-            className="window-control-button"
-            aria-label="Minimize window"
-            onClick={() => window.hanaDesktop?.minimizeWindow?.()}
+            onClick={() =>
+              window.hanaDesktop?.windowMinimize?.() ||
+              window.hanaDesktop?.minimizeWindow?.()
+            }
           >
             _
           </button>
           <button
+            aria-label="window-hide"
+            className="ctrl-btn close"
             type="button"
-            className="window-control-button window-control-button--danger"
-            aria-label="Close window"
-            onClick={() => window.hanaDesktop?.closeWindow?.()}
+            onClick={() =>
+              window.hanaDesktop?.windowHide?.() || window.hanaDesktop?.closeWindow?.()
+            }
           >
-            X
+            ✕
           </button>
         </div>
-      </header>
+      </div>
 
-      <nav className="main-window__tabs" aria-label="main tabs">
+      <div className="tab-bar" aria-label="main tabs">
         {TABS.map((tab) => (
           <button
             key={tab.id}
+            className={`tab ${activeTab === tab.id ? "active" : ""}`}
             type="button"
-            className={`main-window__tab ${activeTab === tab.id ? "is-active" : ""}`}
             onClick={() => setActiveTab(tab.id)}
           >
-            <span>{tab.label}</span>
-            <small>{tab.description}</small>
+            {tab.label}
           </button>
         ))}
-      </nav>
+      </div>
 
-      <section className="main-window__stage">
-        {activeTab === "chat" ? (
-          <ChatWindow
-            autoRoom={autoRoom}
-            currentMood={mood}
-            currentRoom={currentRoom}
-            key={conversationSeed}
-            onAutoRoomChange={setAutoRoom}
-            onMoodChange={setMood}
-            onNewConversation={() => {
-              setConversationSeed((current) => current + 1);
-              setCurrentRoom("general");
-              setAutoRoom(true);
-            }}
-            onRoomChange={setCurrentRoom}
-            onRoomEvent={handleRoomChangeEvent}
-            settings={settingsState.effective.voice}
-          />
-        ) : (
-          <Settings settingsState={settingsState} />
-        )}
-      </section>
-    </section>
+      {activeTab === "chat" ? (
+        <ChatLayout
+          activeConversation={activeConversation}
+          currentConversationId={currentConversationId}
+          groupedConversations={groupedConversations}
+          inputRef={inputRef}
+          messages={chat.messages}
+          mood={mood}
+          onFeedback={chat.submitFeedback}
+          onInputFocus={() => inputRef.current?.focus()}
+          onNewConversation={() => {
+            setCurrentConversationId(null);
+            setSelectedConversationId(null);
+            setRoomType("일반");
+            chat.clearMessages();
+            inputRef.current?.focus();
+          }}
+          onSelectConversation={(conversationId) => {
+            setCurrentConversationId(conversationId);
+            setSelectedConversationId(conversationId);
+          }}
+          onSend={chat.sendMessage}
+          refreshConversations={refreshConversations}
+          roomType={roomType}
+          selectedConversationId={selectedConversationId}
+          sseConnected={mode === "stream"}
+          streaming={chat.isStreaming}
+        />
+      ) : (
+        <SettingsLayout />
+      )}
+    </div>
   );
 }
 

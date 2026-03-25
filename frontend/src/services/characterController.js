@@ -111,8 +111,8 @@ export class CharacterController {
 
     try {
       if (param === "__bodyY") {
-        if (this.renderer.type === "pmx" && this.renderer.model?.position) {
-          this.renderer.model.position.y = value;
+        if (this.renderer.type === "pmx") {
+          return;
         }
         return;
       }

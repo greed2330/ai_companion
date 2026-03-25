@@ -155,6 +155,9 @@ Object.defineProperty(global.navigator, "mediaDevices", {
 
 window.__VITE_API_BASE_URL__ = "http://test";
 window.hanaDesktop = {
+  charPositionApply: jest.fn(),
+  charViewportOpacity: jest.fn(),
+  charViewportSize: jest.fn(),
   closeWindow: jest.fn(),
   finishCharacterDrag: jest.fn(() => Promise.resolve()),
   getAppSettings: jest.fn(() =>
@@ -171,23 +174,32 @@ window.hanaDesktop = {
   getCharacterBounds: jest.fn(() =>
     Promise.resolve({ x: 100, y: 100, width: 300, height: 400 })
   ),
+  getCharacterWindowPlacement: jest.fn(() =>
+    Promise.resolve({ x: 88, y: 50, size: "M" })
+  ),
   getCharacterState: jest.fn(() => Promise.resolve({ pinned: false })),
   hideBubble: jest.fn(),
   minimizeWindow: jest.fn(),
   moveCharacterBy: jest.fn(() => Promise.resolve()),
   notifyAiNameChanged: jest.fn(),
   notifyCharacterMouse: jest.fn(),
+  openCharPositionPopup: jest.fn(),
   onBubbleData: jest.fn(() => () => {}),
   onBubbleTail: jest.fn(() => () => {}),
+  onCharacterSettingsUpdated: jest.fn(() => () => {}),
   onSetTab: jest.fn(() => () => {}),
   quitApp: jest.fn(),
   resolveAssetUrl: jest.fn(() => Promise.resolve("asset://mock")),
   saveAppSettings: jest.fn((payload) => Promise.resolve(payload)),
+  setAutoLaunch: jest.fn(),
+  settingsSaved: jest.fn(),
   showBubble: jest.fn(),
   showMainChatWindow: jest.fn(),
   showMainSettingsWindow: jest.fn(),
   showChatWindow: jest.fn(() => Promise.resolve()),
   showSettingsWindow: jest.fn(() => Promise.resolve()),
   toggleCharacterPinned: jest.fn(() => Promise.resolve({ pinned: true })),
-  toggleMaximizeWindow: jest.fn()
+  toggleMaximizeWindow: jest.fn(),
+  windowHide: jest.fn(),
+  windowMinimize: jest.fn()
 };
