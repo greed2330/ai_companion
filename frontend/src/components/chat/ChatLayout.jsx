@@ -10,6 +10,7 @@ function ChatLayout(props) {
     inputRef,
     messages,
     mood,
+    onDeleteConversation,
     onFeedback,
     onNewConversation,
     onSelectConversation,
@@ -24,6 +25,7 @@ function ChatLayout(props) {
     <div className="chat-layout" data-testid="chat-layout">
       <ConversationSidebar
         groupedConversations={groupedConversations}
+        onDelete={onDeleteConversation}
         onNewConversation={onNewConversation}
         onSelect={onSelectConversation}
         selectedConversationId={selectedConversationId}
@@ -43,6 +45,7 @@ ChatLayout.propTypes = {
   inputRef: PropTypes.object.isRequired,
   messages: PropTypes.array.isRequired,
   mood: PropTypes.string.isRequired,
+  onDeleteConversation: PropTypes.func.isRequired,
   onFeedback: PropTypes.func.isRequired,
   onNewConversation: PropTypes.func.isRequired,
   onSelectConversation: PropTypes.func.isRequired,

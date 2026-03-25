@@ -11,7 +11,6 @@ import {
   createPettingTracker,
   getClickZone,
   getGazeOffset,
-  TIPS,
   ZONE_REACTIONS,
 } from "./character/interactionUtils";
 import { requestReactionBubble } from "../services/reactions";
@@ -43,7 +42,6 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
     opacity: 1,
   });
   const [pinned, setPinned] = useState(false);
-  const [tipIndex, setTipIndex] = useState(0);
 
   function syncViewport(target = rendererRef.current, nextViewport = viewport) {
     if (typeof applyViewportTransform === "function") {
@@ -164,13 +162,6 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
     };
   }, []);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setTipIndex((current) => (current + 1) % TIPS.length);
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   function closeMenu() {
     setMenuState((current) => ({ ...current, open: false }));
   }
@@ -199,6 +190,9 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
   function handleMouseDown(event) {
     closeMenu();
     if (event.button === 0 || event.button === 2) {
+      if (event.button === 2) {
+        window.hanaDesktop?.startCharacterDrag?.();
+      }
       dragRef.current = {
         button: event.button,
         moved: false,
@@ -262,6 +256,7 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
 
     if (currentDrag.button === 2) {
       window.hanaDesktop?.finishCharacterDrag?.();
+      window.hanaDesktop?.endCharacterDrag?.();
       if (!currentDrag.moved) {
         setMenuState({ open: true, x: event.clientX, y: event.clientY });
       }
@@ -287,6 +282,9 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
       onMouseDown={handleMouseDown}
       onMouseEnter={() => window.hanaDesktop?.notifyCharacterMouse?.(true)}
       onMouseLeave={() => {
+        if (dragRef.current?.button === 2) {
+          return;
+        }
         dragRef.current = null;
         pettingTracker.reset();
         window.hanaDesktop?.notifyCharacterMouse?.(false);
@@ -294,10 +292,6 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
     >
-      <div className="character-tip" data-testid="character-tip">
-        {TIPS[tipIndex]}
-      </div>
-
       <div className="character-viewport">
         <div className="character-figure">
           <div className="character-canvas" ref={containerRef} />

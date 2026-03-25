@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   finishCharacterDrag() {
     return ipcRenderer.invoke("character:finish-drag");
   },
+  endCharacterDrag() {
+    ipcRenderer.send("character:drag-end");
+  },
   getAppSettings() {
     return ipcRenderer.invoke("app-settings:get");
   },
@@ -45,6 +48,9 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   },
   moveCharacterBy(deltaX, deltaY) {
     return ipcRenderer.invoke("character:move-by", deltaX, deltaY);
+  },
+  startCharacterDrag() {
+    ipcRenderer.send("character:drag-start");
   },
   notifyAiNameChanged(name) {
     ipcRenderer.send("ai-name-changed", name);

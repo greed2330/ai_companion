@@ -6,6 +6,7 @@ function formatRelativeDate(startedAt) {
 }
 
 function ConversationSidebar({
+  onDelete,
   groupedConversations,
   onNewConversation,
   onSelect,
@@ -28,6 +29,17 @@ function ConversationSidebar({
                 className={`conv-item ${selectedConversationId === conversation.id ? "active" : ""}`}
                 onClick={() => onSelect(conversation.id)}
               >
+                <button
+                  aria-label={`delete-${conversation.id}`}
+                  className="conv-delete-btn"
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDelete(conversation.id);
+                  }}
+                >
+                  ×
+                </button>
                 <div className="conv-title">{conversation.title}</div>
                 <div className="conv-preview">{conversation.preview}</div>
                 <div className="conv-meta">
@@ -45,6 +57,7 @@ function ConversationSidebar({
 
 ConversationSidebar.propTypes = {
   groupedConversations: PropTypes.object.isRequired,
+  onDelete: PropTypes.func.isRequired,
   onNewConversation: PropTypes.func.isRequired,
   onSelect: PropTypes.func.isRequired,
   selectedConversationId: PropTypes.string,

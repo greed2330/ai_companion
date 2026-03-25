@@ -51,6 +51,12 @@ const WINDOW_ROUTES = {
 const BUBBLE_SIZE = { width: 220, height: 90 };
 const MAIN_WINDOW_SIZE = { width: 420, height: 640 };
 const SNAP = 40;
+const CHARACTER_SIZE_MAP = {
+  S: { w: 200, h: 350 },
+  M: { w: 300, h: 500 },
+  L: { w: 400, h: 650 },
+  XL: { w: 500, h: 800 }
+};
 
 let bubbleWindow = null;
 let charPositionWindow = null;
@@ -307,15 +313,13 @@ function showBubble(payload) {
 function createCharacterWindow() {
   const display = screen.getPrimaryDisplay();
   const savedPosition = store.get("charPosition") || { x: 88, y: 50, size: "M" };
-  const sizeMap = {
-    S: { w: 200, h: 350 },
-    M: { w: 300, h: 500 },
-    L: { w: 400, h: 650 },
-    XL: { w: 500, h: 800 }
-  };
-  const selectedSize = sizeMap[savedPosition.size] || sizeMap.M;
-  const width = selectedSize.w;
-  const height = selectedSize.h;
+  const viewportScale = Math.max(
+    0.5,
+    Math.min(2, Number(getStoredAppSettings().character?.viewportScale || 100) / 100)
+  );
+  const selectedSize = CHARACTER_SIZE_MAP[savedPosition.size] || CHARACTER_SIZE_MAP.M;
+  const width = Math.round(selectedSize.w * viewportScale);
+  const height = Math.round(selectedSize.h * viewportScale);
   const x = Math.round((savedPosition.x / 100) * (display.workArea.width - width));
   const y = Math.round((savedPosition.y / 100) * (display.workArea.height - height));
 
@@ -535,10 +539,31 @@ function registerIpcHandlers() {
     if (!characterWindow) {
       return;
     }
-    const baseWidth = 300;
-    const baseHeight = 500;
     const scale = Math.max(0.5, Math.min(2, Number(value || 100) / 100));
-    characterWindow.setSize(Math.round(baseWidth * scale), Math.round(baseHeight * scale));
+    const savedPosition = store.get("charPosition") || { x: 88, y: 50, size: "M" };
+    const baseSize = CHARACTER_SIZE_MAP[savedPosition.size] || CHARACTER_SIZE_MAP.M;
+    const display = getCharacterDisplay();
+    const currentBounds = characterWindow.getBounds();
+    const nextWidth = Math.round(baseSize.w * scale);
+    const nextHeight = Math.round(baseSize.h * scale);
+    const clampedX = Math.max(
+      display.workArea.x,
+      Math.min(display.workArea.x + display.workArea.width - nextWidth, currentBounds.x)
+    );
+    const clampedY = Math.max(
+      display.workArea.y,
+      Math.min(display.workArea.y + display.workArea.height - nextHeight, currentBounds.y)
+    );
+
+    characterWindow.setSize(nextWidth, nextHeight);
+    characterWindow.setPosition(clampedX, clampedY);
+    persistCharacterWindowPlacement({
+      ...currentBounds,
+      width: nextWidth,
+      height: nextHeight,
+      x: clampedX,
+      y: clampedY
+    });
   });
   ipcMain.on("char-viewport-opacity", (_event, value) => {
     characterWindow?.setOpacity?.(Math.max(0.2, Math.min(1, Number(value || 100) / 100)));
@@ -551,13 +576,12 @@ function registerIpcHandlers() {
       return null;
     }
     const current = getStoredAppSettings();
-    const sizeMap = {
-      S: { w: 200, h: 350 },
-      M: { w: 300, h: 500 },
-      L: { w: 400, h: 650 },
-      XL: { w: 500, h: 800 }
+    const viewportScale = Math.max(0.5, Math.min(2, Number(current.character?.viewportScale || 100) / 100));
+    const selectedBaseSize = CHARACTER_SIZE_MAP[payload?.size] || CHARACTER_SIZE_MAP.M;
+    const selectedSize = {
+      w: Math.round(selectedBaseSize.w * viewportScale),
+      h: Math.round(selectedBaseSize.h * viewportScale)
     };
-    const selectedSize = sizeMap[payload?.size] || sizeMap.M;
     const previousCharPosition = store.get("charPosition") || { x: 88, y: 50, size: "M" };
     const saved = saveStoredAppSettings({
       ...current,
@@ -645,6 +669,26 @@ function registerIpcHandlers() {
     moveCharacterWindowBy(deltaX, deltaY)
   );
   ipcMain.handle("character:finish-drag", () => finishCharacterDrag());
+  ipcMain.on("character:drag-start", () => {
+    if (!characterWindow) {
+      return;
+    }
+
+    characterWindow.setIgnoreMouseEvents(false);
+    if (typeof characterWindow.setFocusable === "function") {
+      characterWindow.setFocusable(true);
+    }
+  });
+  ipcMain.on("character:drag-end", () => {
+    if (!characterWindow) {
+      return;
+    }
+
+    if (typeof characterWindow.setFocusable === "function") {
+      characterWindow.setFocusable(false);
+    }
+    characterWindow.setIgnoreMouseEvents(true, { forward: true });
+  });
   ipcMain.handle("character:toggle-pin", () => {
     const nextPinned = !store.get("characterPinned", false);
     store.set("characterPinned", nextPinned);

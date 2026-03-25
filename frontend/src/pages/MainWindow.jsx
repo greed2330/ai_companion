@@ -17,7 +17,12 @@ function MainWindow() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [selectedConversationId, setSelectedConversationId] = useState(null);
   const inputRef = useRef(null);
-  const { conversations, groupedConversations, refreshConversations } = useConversations();
+  const {
+    conversations,
+    deleteConversation,
+    groupedConversations,
+    refreshConversations,
+  } = useConversations();
 
   const { mode } = useMoodStream({
     onMoodChange: setMood,
@@ -104,6 +109,22 @@ function MainWindow() {
           inputRef={inputRef}
           messages={chat.messages}
           mood={mood}
+          onDeleteConversation={async (conversationId) => {
+            const deleted = await deleteConversation(conversationId);
+            if (!deleted) {
+              return;
+            }
+
+            if (
+              conversationId === currentConversationId ||
+              conversationId === selectedConversationId
+            ) {
+              setCurrentConversationId(null);
+              setSelectedConversationId(null);
+              setRoomType("?쇰컲");
+              chat.clearMessages();
+            }
+          }}
           onFeedback={chat.submitFeedback}
           onInputFocus={() => inputRef.current?.focus()}
           onNewConversation={() => {

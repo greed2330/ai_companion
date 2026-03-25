@@ -50,6 +50,24 @@ export default function useConversations() {
     }
   }, []);
 
+  const deleteConversation = useCallback(async (conversationId) => {
+    try {
+      const response = await fetch(buildApiUrl(`/conversations/${conversationId}`), {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        return false;
+      }
+
+      setConversations((current) =>
+        current.filter((conversation) => conversation.id !== conversationId)
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
     refreshConversations();
   }, [refreshConversations]);
@@ -61,6 +79,7 @@ export default function useConversations() {
 
   return {
     conversations,
+    deleteConversation,
     groupedConversations,
     refreshConversations,
   };

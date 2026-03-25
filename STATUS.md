@@ -660,3 +660,68 @@ Validation completed in this pass:
 
 Release file ownership:
 - No files are intentionally locked by Codex, but `05-D` is ongoing and should resume from the files listed above.
+
+## Codex Update - 2026-03-26 (05-D viewport drag blocked, unresolved) 🟡
+
+Branch: `codex/phase3-ux-d`
+
+Current owner-reported blocker:
+- Right-click drag for moving the character window still does not work reliably.
+- Expected behavior:
+  - hold right mouse button on the character
+  - drag like a normal Windows window move
+  - release to place the character window
+- Actual behavior:
+  - drag does not start or immediately breaks
+  - previous attempts to fix it did not restore stable movement
+
+What was attempted in this session:
+- Preserved the original product rule:
+  - popup = character framing
+  - right-click drag = character window movement
+- Reverted a wrong detour where popup `X/Y` was temporarily repurposed to move the window itself.
+- Tried to stop drag cancellation caused by renderer `mouseleave`.
+- Tried to stop drag cancellation caused by re-enabling click-through during drag.
+- Added a temporary drag start/end path in Electron:
+  - during right-drag start: disable `ignoreMouseEvents`, enable focus
+  - during drag end: restore click-through
+
+Why this is still unresolved:
+- The current drag architecture is still not equivalent to native Windows window dragging.
+- The overlay window is created as:
+  - frameless
+  - `focusable: false`
+  - `setIgnoreMouseEvents(true, { forward: true })`
+- Dragging is currently simulated by renderer mouse deltas over IPC:
+  - renderer sends `character:move-by`
+  - main process moves window manually
+- This means drag stability depends on hover state, focusability, click-through timing, and renderer event continuity.
+- In practice, that path is still fragile and is not behaving like a real OS window move.
+
+Important mistakes to avoid repeating:
+- Do not redefine popup semantics again.
+  - popup controls in-viewport character framing, not screen placement
+- Do not mix these three concerns:
+  - character framing
+  - viewport/window size
+  - viewport/window placement
+- Do not assume `mouseleave` handling alone fixes drag.
+- Do not assume PMX framing changes are related to this bug.
+  - owner explicitly separated PMX/framing from viewport drag
+
+Most likely next fix direction:
+- Replace the current renderer-delta drag simulation with a more native main-process drag strategy.
+- Candidate directions to evaluate:
+  - dedicated drag mode in main process using cursor screen position polling
+  - or another Electron-supported frameless drag approach that does not depend on continuous renderer hover events
+- Keep right-click drag as the interaction.
+- Keep popup behavior unchanged.
+
+Files directly involved:
+- [`frontend/src/components/CharacterOverlay.jsx`](/E:/Projects/hana_project/hana_codex/frontend/src/components/CharacterOverlay.jsx)
+- [`frontend/electron/main.js`](/E:/Projects/hana_project/hana_codex/frontend/electron/main.js)
+- [`frontend/electron/preload.js`](/E:/Projects/hana_project/hana_codex/frontend/electron/preload.js)
+
+State of this blocker at handoff:
+- unresolved
+- do not mark viewport/window drag as complete
