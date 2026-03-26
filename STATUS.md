@@ -16,7 +16,7 @@ Phase 1 (대화 AI 코어)     : ✅ 백엔드 완료, 프론트 완료
 Phase 2 (기억)             : ✅ 백엔드 완료 (merged)
 Phase 3 (화면 상주)        : 🔵 백엔드 완료 (PR 대기), 프론트 완료 (PR 대기) — dev 통합 검증 대기
 Phase 4 (MCP/도구)         : ⬜ 미시작
-Phase 4.5 (음성)           : ⬜ 미시작
+Phase 4.5 (음성)           : 🔵 백엔드+프론트+Live2D+채점+일기 완료 (PR 대기)
 Phase 5 (파인튜닝)         : ⬜ 미시작
 Phase 6 (마인크래프트)     : ⬜ 미시작
 Phase 7 (빌드/패키징)      : ⬜ 미시작
@@ -29,11 +29,18 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase3-llm-router (커밋 완료, PR 대기)
+현재 작업 브랜치: claude/phase4.5-tts-stt (완료, PR 대기)
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: LLM Router + Dual-Call Pipeline + Session Judge + Reaction Engine (2026-03-24)
+마지막 완료: Phase 4.5 TTS/STT 전체 — backend + frontend (2026-03-26)
 블로커: 없음
-다음 작업: Phase 4 MCP / 도구 작업 대기
+
+다음 작업 (단위별):
+  - [x] Unit 1: backend STT (Whisper) + POST /voice/stt ✅
+  - [x] Unit 2: frontend 마이크 버튼 + STT 연결 ✅
+  - [x] Unit 3: frontend TTS 재생 (응답 후 자동, mood 전달) ✅
+  - [x] Unit 4: 감정 상태 → TTS pitch/speed 연결 검증 ✅ (tts_emotion.py 기존 구현 확인)
+
+⚠️ 오너 지시 (2026-03-26): Claude Code가 frontend/ 도 담당. Codex 역할 없음.
 ```
 
 **완료된 태스크 (Phase 1):**
@@ -142,17 +149,21 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] 기존 테스트 6개 파일 패치 업데이트 (chat_mod → cp_mod, llm_router mock)
 - [x] 전체 테스트 137/137 통과
 
-**완료된 태스크 (Phase 3 마감 — 2026-03-26):**
-- [x] CharacterOverlay.jsx: 캐릭터 터치 반응 제거 (requestReactionBubble, triggerZoneReaction, pettingTracker)
-- [x] interactionUtils.js: ZONE_REACTIONS 제거, TIPS 8→7개 (터치 팁 제거)
-- [x] backend/routers/settings.py: POST /settings/integrations/{name}/test 추가 (api_key body, 실제 API 연결 테스트)
-- [x] backend/routers/chat.py: DELETE /conversations/{id} 추가 (messages+feedback 연쇄 삭제)
-- [x] frontend/src/services/feedback.js: deleteConversation() 추가
-- [x] frontend/src/components/ChatWindow.jsx: 사이드바 "현재 대화 삭제" 버튼 추가
-- [x] frontend/src/components/Settings.jsx: settings-body 스크롤 영역 분리, 통합 테스트 시 api_key body 전송, 성공 시 status "connected" 업데이트
-- [x] frontend/src/styles/app.css: settings-shell/settings-body/settings-actions/accordion CSS 추가
-- [x] API_CONTRACT.md: DELETE /conversations/{id}, POST /settings/integrations/{name}/test 계약 추가
-- [x] 프론트 테스트 49/49 통과, 빌드 통과
+
+**완료된 태스크 (Phase 4 Memory System + Experience Self-Formation):**
+- [x] backend/models/experience.py: SensoryData/IntegratedRead/HanaInternal/LearningOutput/Experience dataclasses
+- [x] backend/services/memory_service.py: ChromaDB 멀티-컬렉션 (volatile/longterm/experience/preference/dataset) + 마이그레이션 + decay
+- [x] backend/services/sensory_integrator.py: 멀티모달 감각 통합 (audio mismatch > visual > text 우선순위, 규칙 기반)
+- [x] backend/services/experience_collector.py: fire-and-forget 경험 수집 (_background_process 연결)
+- [x] backend/services/preference_system.py: 선호 신호 누적 + 임계값(5회) 초과 시 longterm 자동 승격
+- [x] backend/services/preference_service.py: context_builder.py 스텁 호환 re-export
+- [x] backend/services/philosophy_service.py: 철학적 순간 추적 + revisit_count
+- [x] backend/services/llm_router.py: call_for_text() 헬퍼 추가
+- [x] backend/tasks/decay_tasks.py: ChromaDB longterm decay 통합 + volatile 압축 Celery 태스크
+- [x] backend/celery_app.py: daily-volatile-compress 스케줄 추가 (새벽 1시)
+- [x] backend/main.py: 시작 시 레거시 컬렉션 마이그레이션
+- [x] backend/routers/memory.py: GET /memory/longterm, GET/DELETE /experience/*, GET /experience/preferences, GET /experience/philosophical
+- [x] backend/tests/test_memory_experience.py: 38개 신규 테스트 — 175/175 전부 통과
 
 **Codex에게 전달할 브리핑:**
 - 능동 알림 주기 제어 API 완료.
