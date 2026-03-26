@@ -16,7 +16,7 @@ Phase 1 (대화 AI 코어)     : ✅ 백엔드 완료, 프론트 완료
 Phase 2 (기억)             : ✅ 백엔드 완료 (merged)
 Phase 3 (화면 상주)        : 🔵 백엔드 완료 (PR 대기), 프론트 완료 (PR 대기) — dev 통합 검증 대기
 Phase 4 (MCP/도구)         : ⬜ 미시작
-Phase 4.5 (음성)           : ⬜ 미시작
+Phase 4.5 (음성)           : 🔵 백엔드+프론트 완료 (PR 대기)
 Phase 5 (파인튜닝)         : ⬜ 미시작
 Phase 6 (마인크래프트)     : ⬜ 미시작
 Phase 7 (빌드/패키징)      : ⬜ 미시작
@@ -29,15 +29,15 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase4.5-tts-stt (진행 중)
-현재 작업 중인 파일: frontend/src/services/voice.js, frontend/src/components/ChatWindow.jsx
-마지막 완료: Unit 1 backend STT/TTS endpoints — voice_input.py, voice_output.py, routers/voice.py (2026-03-26)
+현재 작업 브랜치: claude/phase4.5-tts-stt (완료, PR 대기)
+현재 작업 중인 파일: 없음 (소유권 해제)
+마지막 완료: Phase 4.5 TTS/STT 전체 — backend + frontend (2026-03-26)
 블로커: 없음
 다음 작업 (단위별):
   - [x] Unit 1: backend STT (Whisper) + POST /voice/stt ✅
-  - [ ] Unit 2: frontend 마이크 버튼 + STT 연결 (진행 중)
-  - [ ] Unit 3: frontend TTS 재생 (응답 후 자동)
-  - [ ] Unit 4: 감정 상태 → TTS pitch/speed 연결 검증
+  - [x] Unit 2: frontend 마이크 버튼 + STT 연결 ✅
+  - [x] Unit 3: frontend TTS 재생 (응답 후 자동, mood 전달) ✅
+  - [x] Unit 4: 감정 상태 → TTS pitch/speed 연결 검증 ✅ (tts_emotion.py 기존 구현 확인)
 
 ⚠️ 오너 지시 (2026-03-26): Claude Code가 frontend/ 도 담당. Codex 역할 없음.
 ```
