@@ -111,6 +111,43 @@ async def conversations(limit: int = 20) -> dict:
     return {"conversations": result}
 
 
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            DELETE FROM feedback
+            WHERE message_id IN (
+                SELECT id FROM messages WHERE conversation_id = ?
+            )
+            """,
+            (conversation_id,),
+        )
+        await db.execute(
+            """
+            DELETE FROM voice_logs
+            WHERE message_id IN (
+                SELECT id FROM messages WHERE conversation_id = ?
+            )
+            """,
+            (conversation_id,),
+        )
+        await db.execute(
+            "DELETE FROM messages WHERE conversation_id = ?",
+            (conversation_id,),
+        )
+        cursor = await db.execute(
+            "DELETE FROM conversations WHERE id = ?",
+            (conversation_id,),
+        )
+        await db.commit()
+
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail={"error": True, "code": "NOT_FOUND", "message": "conversation not found"})
+
+    return {"success": True, "conversation_id": conversation_id}
+
+
 @router.post("/feedback")
 async def feedback(req: FeedbackRequest) -> dict:
     """명시적 피드백을 기록한다. experience_id가 있으면 점수 업데이트 시도."""

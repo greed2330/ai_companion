@@ -4,265 +4,206 @@ import {
   fetchLlmModels,
   fetchModels,
   fetchPersona,
+  previewPersona as requestPersonaPreview,
   saveAutonomous,
   savePersona,
-  selectLlmModel,
-  selectModel
+  selectLlmModel as requestLlmSelect,
+  selectModel,
 } from "../services/settings";
-import { OUTPUT_MODES } from "../constants/outputModes";
 
 export const DEFAULT_SETTINGS = {
-  character: {
-    modelId: "",
-    modelType: "Live2D",
-    viewportScale: 100
-  },
   persona: {
     ai_name: "하나",
     owner_nickname: "",
     speech_preset: "bright_friend",
-    speech_style: "",
     personality_preset: "energetic",
-    personality: "",
-    interests: ""
-  },
-  aiModel: {
-    chatModelId: "",
-    status: "연결됨",
-    huggingFacePath: "",
-    huggingFaceFound: 0
+    interests: "",
+    speech_style: "",
   },
   autonomous: {
-    masterEnabled: false,
-    auto_search: false,
-    background_search: false,
-    crawl_learning: false,
-    auto_react: false,
     proactive_chat: false,
-    screen_reaction: true,
-    assist_work: false,
-    terminal_access: false,
-    document_link: false,
-    search_limit: 10,
     tip_bubbles: true,
+    screen_reaction: true,
     schedule_reminder: false,
-    auto_crawl: false
+    auto_crawl: false,
   },
-  integrations: {
-    serper: { status: "grey", apiKey: "" },
-    google_calendar: { status: "grey", apiKey: "", note: "credentials.json 필요" },
-    github: { status: "grey", apiKey: "" }
-  },
-  voice: {
-    inputMode: "text",
-    outputMode: OUTPUT_MODES.CHAT,
-    ttsEnabled: false,
-    voicePreset: "kokoro",
-    samplePath: "",
-    hotwordEnabled: false
-  },
-  app: {
-    theme: "dark-anime",
-    shortcut: "Alt+H",
-    autoLaunch: false
-  }
+  outputMode: "chat",
+  theme: "dark-anime",
+  autoLaunch: false,
+  viewportSize: 100,
+  viewportOpacity: 100,
 };
-
-function mergeDeep(base, patch) {
-  const next = { ...base };
-
-  Object.entries(patch || {}).forEach(([key, value]) => {
-    if (
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      typeof base[key] === "object"
-    ) {
-      next[key] = mergeDeep(base[key], value);
-      return;
-    }
-
-    next[key] = value;
-  });
-
-  return next;
-}
 
 export function applyTheme(theme) {
   document.body.className = `theme-${theme}`;
 }
 
-function normalizeAutonomous(payload) {
-  const next = {
-    ...DEFAULT_SETTINGS.autonomous,
-    ...payload
-  };
-
-  next.auto_search = Boolean(next.background_search || next.crawl_learning || next.auto_crawl);
-  next.auto_react = Boolean(next.proactive_chat || next.screen_reaction);
-  next.assist_work = Boolean(next.terminal_access || next.document_link);
-  next.masterEnabled = Boolean(next.auto_search || next.auto_react || next.assist_work);
-  return next;
-}
-
 export default function useSettings() {
-  const [saved, setSaved] = useState(null);
+  const [saved, setSaved] = useState(DEFAULT_SETTINGS);
   const [pending, setPending] = useState(null);
-  const [meta, setMeta] = useState({
-    characterModels: [],
-    llmModels: [],
-    previewSamples: [],
-    integrationState: {}
-  });
-  const [error, setError] = useState("");
+  const [models, setModels] = useState([]);
+  const [currentModelId, setCurrentModelId] = useState("");
+  const [llmModels, setLlmModels] = useState([]);
+  const [currentLlmModelId, setCurrentLlmModelId] = useState("");
+  const [previewSamples, setPreviewSamples] = useState([]);
 
   useEffect(() => {
-    async function load() {
+    Promise.all([
+      fetchPersona().catch(() => null),
+      fetchAutonomous().catch(() => null),
+      window.hanaDesktop?.getAppSettings?.() || Promise.resolve({}),
+    ]).then(([persona, autonomous, appSettings]) => {
+      const next = {
+        ...DEFAULT_SETTINGS,
+        ...(persona ? { persona: { ...DEFAULT_SETTINGS.persona, ...persona } } : {}),
+        ...(autonomous ? { autonomous: { ...DEFAULT_SETTINGS.autonomous, ...autonomous } } : {}),
+        ...(appSettings?.voice?.outputMode ? { outputMode: appSettings.voice.outputMode } : {}),
+        ...(appSettings?.app?.theme ? { theme: appSettings.app.theme } : {}),
+        ...(typeof appSettings?.app?.autoLaunch === "boolean" ? { autoLaunch: appSettings.app.autoLaunch } : {}),
+        ...(appSettings?.character?.viewportScale ? { viewportSize: appSettings.character.viewportScale } : {}),
+        ...(typeof appSettings?.character?.opacity === "number"
+          ? { viewportOpacity: appSettings.character.opacity }
+          : {}),
+      };
+      setSaved(next);
+      applyTheme(next.theme);
+    });
+  }, []);
+
+  useEffect(() => {
+    async function loadModels() {
       try {
-        const [
-          persona,
-          autonomous,
-          characterModelsPayload,
-          llmModelsPayload,
-          appSettings
-        ] = await Promise.all([
-          fetchPersona(),
-          fetchAutonomous(),
-          fetchModels(),
-          fetchLlmModels(),
-          window.hanaDesktop?.getAppSettings?.() || {}
-        ]);
-
-        const currentCharacter =
-          characterModelsPayload.models?.find(
-            (model) => model.id === characterModelsPayload.current
-          ) || characterModelsPayload.models?.[0];
-
-        const nextSaved = mergeDeep(DEFAULT_SETTINGS, {
-          character: {
-            modelId: currentCharacter?.id || "",
-            modelType: currentCharacter?.type?.toUpperCase() || "Live2D"
-          },
-          persona,
-          aiModel: {
-            chatModelId: llmModelsPayload.current_chat_model || "",
-            status: "연결됨"
-          },
-          autonomous: normalizeAutonomous(autonomous),
-          app: appSettings?.app || {},
-          voice: appSettings?.voice || {},
-          integrations: appSettings?.integrations || {}
-        });
-
-        setMeta((current) => ({
-          ...current,
-          characterModels: characterModelsPayload.models || [],
-          llmModels: llmModelsPayload.models || []
-        }));
-        setSaved(nextSaved);
-        applyTheme(nextSaved.app.theme);
-      } catch (loadError) {
-        setError(loadError.message);
-        setSaved(DEFAULT_SETTINGS);
-        applyTheme(DEFAULT_SETTINGS.app.theme);
+        const payload = await fetchModels();
+        setModels(payload.models || []);
+        setCurrentModelId(payload.current || payload.models?.[0]?.id || "");
+      } catch {
+        setModels([]);
       }
     }
 
-    load();
+    async function loadLlmModels() {
+      try {
+        const payload = await fetchLlmModels();
+        const chatModels = (payload.models || []).filter((model) => model.role === "chat");
+        setLlmModels(chatModels);
+        setCurrentLlmModelId(payload.current_chat_model || chatModels[0]?.id || "");
+      } catch {
+        setLlmModels([]);
+      }
+    }
+
+    loadModels();
+    loadLlmModels();
   }, []);
 
-  const effective = useMemo(
-    () => mergeDeep(saved || DEFAULT_SETTINGS, pending || {}),
-    [pending, saved]
-  );
+  const current = useMemo(() => pending ?? saved, [pending, saved]);
 
-  function updatePending(section, value) {
-    setPending((current) =>
-      mergeDeep(current || {}, {
-        [section]: mergeDeep((effective || DEFAULT_SETTINGS)[section], value)
-      })
-    );
+  function updatePending(key, value) {
+    setPending((prev) => ({ ...(prev ?? saved), [key]: value }));
   }
 
-  async function handleConfirm() {
-    const next = effective;
+  async function handleSave() {
+    const next = pending ?? saved;
+    const appSettings = (await window.hanaDesktop?.getAppSettings?.()) || {};
+    const currentCharacter = appSettings.character || {};
+    const currentApp = appSettings.app || {};
+    const currentVoice = appSettings.voice || {};
 
-    await savePersona(next.persona);
-    await saveAutonomous({
-      proactive_chat: next.autonomous.proactive_chat,
-      tip_bubbles: next.autonomous.tip_bubbles,
-      screen_reaction: next.autonomous.screen_reaction,
-      schedule_reminder: next.autonomous.schedule_reminder,
-      auto_crawl: next.autonomous.auto_crawl
-    });
-
-    if (next.character.modelId && next.character.modelId !== saved?.character?.modelId) {
-      await selectModel(next.character.modelId);
-    }
-
-    if (next.aiModel.chatModelId && next.aiModel.chatModelId !== saved?.aiModel?.chatModelId) {
-      await selectLlmModel(next.aiModel.chatModelId);
-    }
+    await Promise.all([
+      savePersona(next.persona).catch(() => null),
+      saveAutonomous(next.autonomous).catch(() => null),
+    ]);
 
     await window.hanaDesktop?.saveAppSettings?.({
-      app: next.app,
-      integrations: next.integrations,
-      voice: next.voice
+      app: {
+        ...currentApp,
+        theme: next.theme,
+        autoLaunch: next.autoLaunch,
+        shortcut: currentApp.shortcut || "Alt+H",
+      },
+      character: {
+        ...currentCharacter,
+        viewportScale: next.viewportSize,
+        opacity: next.viewportOpacity,
+      },
+      voice: {
+        ...currentVoice,
+        outputMode: next.outputMode,
+      },
     });
-
-    if (saved?.persona?.ai_name !== next.persona.ai_name) {
-      window.hanaDesktop?.notifyAiNameChanged?.(next.persona.ai_name);
-    }
 
     setSaved(next);
     setPending(null);
+    try {
+      const channel = new BroadcastChannel("hana-overlay");
+      channel.postMessage({
+        type: "character_settings_updated",
+        character: {
+          viewportScale: next.viewportSize,
+          opacity: next.viewportOpacity,
+        },
+      });
+      channel.close();
+    } catch {}
+    window.hanaDesktop?.settingsSaved?.({
+      theme: next.theme,
+      autoLaunch: next.autoLaunch,
+    });
+    if (next.autoLaunch !== saved.autoLaunch) {
+      window.hanaDesktop?.setAutoLaunch?.(next.autoLaunch);
+    }
   }
 
   function handleCancel() {
     setPending(null);
-    applyTheme((saved || DEFAULT_SETTINGS).app.theme);
+    applyTheme(saved.theme);
   }
 
-  async function handleReset() {
-    if (!window.confirm("모든 설정을 초기화할까요?")) {
-      return;
+  function handleReset() {
+    if (window.confirm("모든 설정을 초기화할까요?")) {
+      setPending(DEFAULT_SETTINGS);
+      applyTheme(DEFAULT_SETTINGS.theme);
     }
-
-    await savePersona(DEFAULT_SETTINGS.persona);
-    await saveAutonomous({
-      proactive_chat: DEFAULT_SETTINGS.autonomous.proactive_chat,
-      tip_bubbles: DEFAULT_SETTINGS.autonomous.tip_bubbles,
-      screen_reaction: DEFAULT_SETTINGS.autonomous.screen_reaction,
-      schedule_reminder: DEFAULT_SETTINGS.autonomous.schedule_reminder,
-      auto_crawl: DEFAULT_SETTINGS.autonomous.auto_crawl
-    });
-    await window.hanaDesktop?.saveAppSettings?.({
-      app: DEFAULT_SETTINGS.app,
-      integrations: DEFAULT_SETTINGS.integrations,
-      voice: DEFAULT_SETTINGS.voice
-    });
-    setSaved(DEFAULT_SETTINGS);
-    setPending(null);
-    applyTheme(DEFAULT_SETTINGS.app.theme);
   }
 
-  function handleThemeChange(theme) {
-    updatePending("app", { theme });
-    applyTheme(theme);
+  async function previewPersona() {
+    const payload = pending ?? saved;
+    try {
+      const data = await requestPersonaPreview(payload.persona);
+      setPreviewSamples(data.samples || []);
+      return data.samples || [];
+    } catch {
+      setPreviewSamples([]);
+      return [];
+    }
+  }
+
+  async function selectCharacterModel(modelId) {
+    setCurrentModelId(modelId);
+    await selectModel(modelId).catch(() => null);
+  }
+
+  async function selectLlmModel(modelId) {
+    setCurrentLlmModelId(modelId);
+    await requestLlmSelect(modelId).catch(() => null);
   }
 
   return {
-    effective,
-    error,
-    meta,
-    pending,
     saved,
-    setError,
-    setMeta,
+    pending,
+    current,
+    models,
+    currentModelId,
+    llmModels,
+    currentLlmModelId,
+    previewSamples,
     updatePending,
+    handleSave,
     handleCancel,
-    handleConfirm,
     handleReset,
-    handleThemeChange
+    previewPersona,
+    selectCharacterModel,
+    selectLlmModel,
+    setPreviewSamples,
   };
 }

@@ -1,55 +1,93 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import MainWindow from "../pages/MainWindow";
 
 jest.mock("../hooks/useMoodStream", () => jest.fn());
-jest.mock("../hooks/useAfkDetection", () => jest.fn());
+jest.mock("../hooks/useConversations", () => jest.fn());
+jest.mock("../hooks/useChat", () => jest.fn());
 jest.mock("../hooks/useSettings", () =>
   jest.fn(() => ({
-    effective: {
-      persona: { ai_name: "하나" },
-      voice: { inputMode: "text", outputMode: "chat" },
+    current: {
+      persona: { ai_name: "하나", owner_nickname: "" },
       autonomous: {
-        background_search: false,
-        crawl_learning: false,
         proactive_chat: false,
+        tip_bubbles: true,
         screen_reaction: true,
-        terminal_access: false,
-        document_link: false,
-        search_limit: 10
+        schedule_reminder: false,
+        auto_crawl: false,
       },
-      integrations: {
-        serper: { status: "grey", apiKey: "" },
-        google_calendar: { status: "grey", apiKey: "" },
-        github: { status: "grey", apiKey: "" }
-      },
-      character: { modelId: "furina", modelType: "PMX", viewportScale: 100 },
-      aiModel: { chatModelId: "qwen3:14b", status: "연결됨" },
-      app: { theme: "dark-anime", shortcut: "Alt+H", autoLaunch: false }
+      outputMode: "chat",
+      theme: "dark-anime",
+      autoLaunch: false,
+      viewportSize: 100,
+      viewportOpacity: 85,
     },
-    error: "",
+    saved: null,
+    pending: null,
+    models: [],
+    currentModelId: "",
+    llmModels: [],
+    currentLlmModelId: "",
+    previewSamples: [],
+    updatePending: jest.fn(),
     handleCancel: jest.fn(),
-    handleConfirm: jest.fn(),
     handleReset: jest.fn(),
-    handleThemeChange: jest.fn(),
-    meta: {
-      characterModels: [],
-      llmModels: [],
-      previewSamples: [],
-      integrationState: {}
-    },
-    setError: jest.fn(),
-    setMeta: jest.fn(),
-    updatePending: jest.fn()
+    handleSave: jest.fn(),
+    previewPersona: jest.fn(),
+    selectCharacterModel: jest.fn(),
+    selectLlmModel: jest.fn(),
+    setPreviewSamples: jest.fn(),
   }))
 );
 
 const useMoodStream = jest.requireMock("../hooks/useMoodStream");
+const useConversations = jest.requireMock("../hooks/useConversations");
+const useChat = jest.requireMock("../hooks/useChat");
 
 describe("MainWindow", () => {
   beforeEach(() => {
     useMoodStream.mockImplementation(({ onRoomChange }) => {
       window.__roomChangeHandler = onRoomChange;
       return { mode: "stream" };
+    });
+    useConversations.mockReturnValue({
+      conversations: [
+        {
+          id: "conv-1",
+          title: "첫 대화",
+          preview: "마지막 메시지",
+          started_at: new Date().toISOString(),
+          roomType: "일반",
+        },
+      ],
+      groupedConversations: {
+        오늘: [
+          {
+            id: "conv-1",
+            title: "첫 대화",
+            preview: "마지막 메시지",
+            started_at: new Date().toISOString(),
+            roomType: "일반",
+          },
+        ],
+        어제: [],
+        "지난 7일": [],
+        "더 이전": [],
+      },
+      refreshConversations: jest.fn(),
+    });
+    useChat.mockReturnValue({
+      messages: [
+        {
+          id: "msg-1",
+          role: "assistant",
+          content: "기존 대화 유지",
+          created_at: "2026-03-25T10:00:00.000Z",
+        },
+      ],
+      isStreaming: false,
+      sendMessage: jest.fn(),
+      submitFeedback: jest.fn(),
+      clearMessages: jest.fn(),
     });
     window.hanaDesktop.onSetTab.mockImplementation((callback) => {
       window.__setTabHandler = callback;
@@ -65,53 +103,38 @@ describe("MainWindow", () => {
     window.__setTabHandler = null;
   });
 
-  test("IPC set-tab switches to settings tab", async () => {
+  test("IPC set-tab switches to settings tab", () => {
     render(<MainWindow />);
 
     act(() => {
       window.__setTabHandler("settings");
     });
-    expect(await screen.findByTestId("settings-panel")).toBeInTheDocument();
+
+    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-layout")).not.toBeInTheDocument();
   });
 
-  test("room_change event updates current room and shows bubble", async () => {
+  test("tab switch preserves chat state", () => {
+    const { container } = render(<MainWindow />);
+    const tabs = container.querySelectorAll(".tab-bar .tab");
+
+    expect(screen.getByText("기존 대화 유지")).toBeInTheDocument();
+
+    fireEvent.click(tabs[1]);
+    expect(screen.getByTestId("settings-panel")).toBeInTheDocument();
+
+    fireEvent.click(tabs[0]);
+    expect(screen.getByTestId("chat-layout")).toBeInTheDocument();
+    expect(screen.getByText("기존 대화 유지")).toBeInTheDocument();
+  });
+
+  test("room_change event updates room badge", () => {
     render(<MainWindow />);
 
     act(() => {
-      window.__roomChangeHandler({
-        room_type: "coding",
-        message: "코딩 대화로 바꿀게~"
-      });
+      window.__roomChangeHandler({ room_type: "코딩" });
     });
 
-    await waitFor(() =>
-      expect(screen.getByText("코딩")).toBeInTheDocument()
-    );
-    expect(window.hanaDesktop.showBubble).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "코딩 대화로 바꿀게~",
-        mood: "CURIOUS",
-        type: "alert"
-      })
-    );
-  });
-
-  test("manual room override ignores later auto room changes", async () => {
-    render(<MainWindow />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
-    fireEvent.click(screen.getByRole("button", { name: /코딩/i }));
-
-    act(() => {
-      window.__roomChangeHandler({
-        room_type: "game",
-        message: "게임 대화로 바꿀게~"
-      });
-    });
-
-    await waitFor(() =>
-      expect(screen.getByText("코딩")).toBeInTheDocument()
-    );
-    expect(screen.queryByText("게임")).not.toBeInTheDocument();
+    expect(screen.getByText("코딩")).toBeInTheDocument();
   });
 });

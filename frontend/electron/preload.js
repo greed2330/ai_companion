@@ -13,11 +13,17 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   finishCharacterDrag() {
     return ipcRenderer.invoke("character:finish-drag");
   },
+  endCharacterDrag() {
+    ipcRenderer.send("character:drag-end");
+  },
   getAppSettings() {
     return ipcRenderer.invoke("app-settings:get");
   },
   getCharacterBounds() {
     return ipcRenderer.invoke("character:get-bounds");
+  },
+  getCharacterWindowPlacement() {
+    return ipcRenderer.invoke("character:get-window-placement");
   },
   getCharacterState() {
     return ipcRenderer.invoke("character:get-state");
@@ -25,11 +31,26 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   hideBubble() {
     ipcRenderer.send("hide-bubble");
   },
+  charPositionApply(payload) {
+    return ipcRenderer.invoke("char-position-apply", payload);
+  },
+  charViewportOpacity(value) {
+    ipcRenderer.send("char-viewport-opacity", value);
+  },
+  charViewportSize(value) {
+    ipcRenderer.send("char-viewport-size", value);
+  },
   minimizeWindow() {
     return ipcRenderer.invoke("window:minimize");
   },
+  openCharPositionPopup() {
+    ipcRenderer.send("open-char-position-popup");
+  },
   moveCharacterBy(deltaX, deltaY) {
     return ipcRenderer.invoke("character:move-by", deltaX, deltaY);
+  },
+  startCharacterDrag() {
+    ipcRenderer.send("character:drag-start");
   },
   notifyAiNameChanged(name) {
     ipcRenderer.send("ai-name-changed", name);
@@ -43,6 +64,9 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   onBubbleTail(callback) {
     return createListener("bubble-tail", callback);
   },
+  onCharacterSettingsUpdated(callback) {
+    return createListener("character-settings-updated", callback);
+  },
   onSetTab(callback) {
     return createListener("set-tab", callback);
   },
@@ -54,6 +78,12 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   },
   saveAppSettings(payload) {
     return ipcRenderer.invoke("app-settings:save", payload);
+  },
+  setAutoLaunch(value) {
+    ipcRenderer.send("set-auto-launch", value);
+  },
+  settingsSaved(payload) {
+    ipcRenderer.send("settings-saved", payload);
   },
   showBubble(payload) {
     ipcRenderer.send("show-bubble", payload);
@@ -75,5 +105,11 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   },
   toggleMaximizeWindow() {
     return ipcRenderer.invoke("window:maximize-toggle");
+  },
+  windowHide() {
+    ipcRenderer.send("window-hide");
+  },
+  windowMinimize() {
+    ipcRenderer.send("window-minimize");
   }
 });

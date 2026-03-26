@@ -3,19 +3,21 @@ import PropTypes from "prop-types";
 import {
   applyGaze,
   applyMood,
+  applyViewportTransform,
   detectModelType,
-  loadCharacterModel
+  loadCharacterModel,
 } from "./characterRenderer";
 import {
   createPettingTracker,
   getClickZone,
   getGazeOffset,
-  TIPS,
-  ZONE_REACTIONS
+  ZONE_REACTIONS,
 } from "./character/interactionUtils";
 import { requestReactionBubble } from "../services/reactions";
+import { characterController } from "../services/characterController";
 
-function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
+function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하나" }) {
+  const stageRef = useRef(null);
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const dragRef = useRef(null);
@@ -25,16 +27,30 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
         window.hanaDesktop?.showBubble?.({
           message: "기분 좋다~",
           mood: "HAPPY",
-          type: "talk"
+          type: "talk",
         });
       }),
     []
   );
+
   const [hasRenderableModel, setHasRenderableModel] = useState(false);
   const [menuState, setMenuState] = useState({ open: false, x: 0, y: 0 });
-  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const [viewport, setViewport] = useState({
+    positionX: 50,
+    positionY: 50,
+    scale: 1,
+    opacity: 1,
+  });
   const [pinned, setPinned] = useState(false);
-  const [tipIndex, setTipIndex] = useState(0);
+
+  function syncViewport(target = rendererRef.current, nextViewport = viewport) {
+    if (typeof applyViewportTransform === "function") {
+      applyViewportTransform(target, nextViewport);
+      return;
+    }
+
+    target?.applyViewport?.(nextViewport);
+  }
 
   useEffect(() => {
     async function mountModel() {
@@ -48,19 +64,24 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
         const instance = await loadCharacterModel(
           container,
           modelPath,
-          async (relativePath) =>
-            window.hanaDesktop?.resolveAssetUrl?.(relativePath) || ""
+          async (relativePath) => window.hanaDesktop?.resolveAssetUrl?.(relativePath) || ""
         );
         rendererRef.current = instance;
+        if (instance) {
+          await characterController.init(instance, modelId);
+          syncViewport(instance, viewport);
+        }
         setHasRenderableModel(Boolean(instance));
-      } catch (error) {
+      } catch {
         rendererRef.current?.cleanup?.();
+        characterController.detach();
         rendererRef.current = null;
         setHasRenderableModel(false);
       }
     }
 
     rendererRef.current?.cleanup?.();
+    characterController.detach();
     rendererRef.current = null;
     if (containerRef.current) {
       containerRef.current.innerHTML = "";
@@ -68,14 +89,19 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
     mountModel();
 
     return () => {
+      characterController.detach();
       rendererRef.current?.cleanup?.();
       rendererRef.current = null;
     };
-  }, [modelPath]);
+  }, [modelId, modelPath]);
 
   useEffect(() => {
     applyMood(rendererRef.current, mood);
   }, [mood]);
+
+  useEffect(() => {
+    syncViewport(rendererRef.current, viewport);
+  }, [viewport]);
 
   useEffect(() => {
     window.hanaDesktop?.getCharacterState?.().then((state) => {
@@ -84,10 +110,56 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
   }, []);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setTipIndex((current) => (current + 1) % TIPS.length);
-    }, 5000);
-    return () => window.clearInterval(timer);
+    async function loadViewportSettings() {
+      const appSettings = await window.hanaDesktop?.getAppSettings?.();
+      const character = appSettings?.character || {};
+      setViewport((current) => ({
+        ...current,
+        positionX: Number(character.positionX ?? 50),
+        positionY: Number(character.positionY ?? 50),
+        scale: Number(character.viewportScale ?? 100) / 100,
+        opacity: Number(character.opacity ?? 100) / 100,
+      }));
+    }
+
+    loadViewportSettings();
+
+    const channel = new BroadcastChannel("hana-overlay");
+    channel.onmessage = (event) => {
+      if (event.data?.type !== "character_settings_updated") {
+        return;
+      }
+
+      const character = event.data.character || {};
+      setViewport((current) => {
+        const nextViewport = {
+          ...current,
+          positionX: Number(character.positionX ?? current.positionX),
+          positionY: Number(character.positionY ?? current.positionY),
+          scale: Number(character.viewportScale ?? current.scale * 100) / 100,
+        };
+        syncViewport(rendererRef.current, nextViewport);
+        return nextViewport;
+      });
+    };
+
+    const unsubscribe = window.hanaDesktop?.onCharacterSettingsUpdated?.((character) => {
+      setViewport((current) => {
+        const nextViewport = {
+          ...current,
+          positionX: Number(character?.positionX ?? current.positionX),
+          positionY: Number(character?.positionY ?? current.positionY),
+          scale: Number(character?.viewportScale ?? current.scale * 100) / 100,
+        };
+        syncViewport(rendererRef.current, nextViewport);
+        return nextViewport;
+      });
+    });
+
+    return () => {
+      channel.close();
+      unsubscribe?.();
+    };
   }, []);
 
   function closeMenu() {
@@ -104,27 +176,30 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
       window.hanaDesktop?.showBubble?.({
         message: bubble.message || reaction.emoji,
         mood: bubble.mood || reaction.mood,
-        type: "talk"
+        type: "talk",
       });
     } catch {
       window.hanaDesktop?.showBubble?.({
         message: reaction.emoji,
         mood: reaction.mood,
-        type: "talk"
+        type: "talk",
       });
     }
   }
 
   function handleMouseDown(event) {
     closeMenu();
-    if (event.button === 0 || event.button === 1 || event.button === 2) {
+    if (event.button === 0 || event.button === 2) {
+      if (event.button === 2) {
+        window.hanaDesktop?.startCharacterDrag?.();
+      }
       dragRef.current = {
         button: event.button,
         moved: false,
         startX: event.clientX,
         startY: event.clientY,
         screenX: event.screenX,
-        screenY: event.screenY
+        screenY: event.screenY,
       };
     }
   }
@@ -136,12 +211,16 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
     pettingTracker.update({ movementX: event.movementX, zone });
 
     window.hanaDesktop?.getCharacterBounds?.().then((charBounds) => {
-      const gaze = getGazeOffset(event.screenX, event.screenY, charBounds || {
-        x: 0,
-        y: 0,
-        width: bounds.width,
-        height: bounds.height
-      });
+      const gaze = getGazeOffset(
+        event.screenX,
+        event.screenY,
+        charBounds || {
+          x: 0,
+          y: 0,
+          width: bounds.width,
+          height: bounds.height,
+        }
+      );
       applyGaze(rendererRef.current, gaze.x, gaze.y);
     });
 
@@ -166,13 +245,6 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
       currentDrag.screenY = event.screenY;
     }
 
-    if (currentDrag.button === 1) {
-      setViewport((current) => ({
-        ...current,
-        x: current.x + event.movementX,
-        y: current.y + event.movementY
-      }));
-    }
   }
 
   function handleMouseUp(event) {
@@ -184,6 +256,7 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
 
     if (currentDrag.button === 2) {
       window.hanaDesktop?.finishCharacterDrag?.();
+      window.hanaDesktop?.endCharacterDrag?.();
       if (!currentDrag.moved) {
         setMenuState({ open: true, x: event.clientX, y: event.clientY });
       }
@@ -194,18 +267,6 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
     }
   }
 
-  function handleWheel(event) {
-    if (!event.ctrlKey) {
-      return;
-    }
-
-    event.preventDefault();
-    setViewport((current) => ({
-      ...current,
-      scale: Math.max(0.6, Math.min(1.8, current.scale - event.deltaY * 0.001))
-    }));
-  }
-
   async function handleTogglePin() {
     const state = await window.hanaDesktop?.toggleCharacterPinned?.();
     setPinned(Boolean(state?.pinned));
@@ -214,29 +275,24 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
 
   return (
     <section
+      ref={stageRef}
       className="character-stage"
       data-testid="character-overlay"
       onContextMenu={(event) => event.preventDefault()}
       onMouseDown={handleMouseDown}
       onMouseEnter={() => window.hanaDesktop?.notifyCharacterMouse?.(true)}
       onMouseLeave={() => {
+        if (dragRef.current?.button === 2) {
+          return;
+        }
         dragRef.current = null;
         pettingTracker.reset();
         window.hanaDesktop?.notifyCharacterMouse?.(false);
       }}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onWheel={handleWheel}
     >
-      <div className="character-tip" data-testid="character-tip">
-        {TIPS[tipIndex]}
-      </div>
-      <div
-        className="character-viewport"
-        style={{
-          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`
-        }}
-      >
+      <div className="character-viewport">
         <div className="character-figure">
           <div className="character-canvas" ref={containerRef} />
           {!hasRenderableModel ? (
@@ -247,11 +303,9 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
           ) : null}
         </div>
       </div>
+
       {menuState.open ? (
-        <div
-          className="character-menu"
-          style={{ left: menuState.x, top: menuState.y }}
-        >
+        <div className="character-menu" style={{ left: menuState.x, top: menuState.y }}>
           <button type="button" onClick={() => window.hanaDesktop?.showChatWindow?.()}>
             채팅 열기
           </button>
@@ -272,8 +326,9 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
 
 CharacterOverlay.propTypes = {
   mood: PropTypes.string.isRequired,
+  modelId: PropTypes.string,
   modelPath: PropTypes.string,
-  modelName: PropTypes.string
+  modelName: PropTypes.string,
 };
 
 export { detectModelType, getClickZone, createPettingTracker };

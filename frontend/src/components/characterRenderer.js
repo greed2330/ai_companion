@@ -10,23 +10,33 @@
 // mood별 raw 파라미터 (fallback용)
 const MOOD_PARAMS = {
   live2d: {
-    IDLE:      { ParamEyeOpen: 1.0,  ParamMouthOpenY: 0,    ParamBodyAngleX: 0  },
-    HAPPY:     { ParamEyeOpen: 0.6,  ParamMouthOpenY: 0.8,  ParamBodyAngleX: 5  },
-    CONCERNED: { ParamEyeOpen: 1.0,  ParamMouthOpenY: 0.2,  ParamBodyAngleX: -3 },
-    FOCUSED:   { ParamEyeOpen: 1.0,  ParamMouthOpenY: 0,    ParamBodyAngleX: 0  },
-    CURIOUS:   { ParamEyeOpen: 1.2,  ParamMouthOpenY: 0.1,  ParamBodyAngleX: 10 },
-    GAMING:    { ParamEyeOpen: 1.2,  ParamMouthOpenY: 0.5,  ParamBodyAngleX: 8  },
-    SLEEPY:    { ParamEyeOpen: 0.45, ParamMouthOpenY: 0.05, ParamBodyAngleX: -4 }
+    IDLE: { ParamEyeOpen: 1.0, ParamMouthOpenY: 0, ParamBodyAngleX: 0 },
+    HAPPY: { ParamEyeOpen: 0.6, ParamMouthOpenY: 0.8, ParamBodyAngleX: 5 },
+    CONCERNED: { ParamEyeOpen: 1.0, ParamMouthOpenY: 0.2, ParamBodyAngleX: -3 },
+    FOCUSED: { ParamEyeOpen: 1.0, ParamMouthOpenY: 0, ParamBodyAngleX: 0 },
+    CURIOUS: { ParamEyeOpen: 1.2, ParamMouthOpenY: 0.1, ParamBodyAngleX: 10 },
+    GAMING: { ParamEyeOpen: 1.2, ParamMouthOpenY: 0.5, ParamBodyAngleX: 8 },
+    SLEEPY: { ParamEyeOpen: 0.45, ParamMouthOpenY: 0.05, ParamBodyAngleX: -4 },
   },
   pmx: {
-    IDLE:      { morphs: [] },
-    HAPPY:     { morphs: [{ name: "\u7b11\u3044", weight: 0.8 }, { name: "\u3042", weight: 0.3 }] },
+    IDLE: { morphs: [] },
+    HAPPY: {
+      morphs: [
+        { name: "\u7b11\u3044", weight: 0.8 },
+        { name: "\u3042", weight: 0.3 },
+      ],
+    },
     CONCERNED: { morphs: [{ name: "\u56f0\u308b", weight: 0.7 }] },
-    FOCUSED:   { morphs: [] },
-    CURIOUS:   { morphs: [{ name: "\u9a5a\u304d", weight: 0.5 }] },
-    GAMING:    { morphs: [{ name: "\u7b11\u3044", weight: 0.6 }, { name: "\u3042", weight: 0.5 }] },
-    SLEEPY:    { morphs: [{ name: "\u56f0\u308b", weight: 0.35 }] }
-  }
+    FOCUSED: { morphs: [] },
+    CURIOUS: { morphs: [{ name: "\u9a5a\u304d", weight: 0.5 }] },
+    GAMING: {
+      morphs: [
+        { name: "\u7b11\u3044", weight: 0.6 },
+        { name: "\u3042", weight: 0.5 },
+      ],
+    },
+    SLEEPY: { morphs: [{ name: "\u56f0\u308b", weight: 0.35 }] },
+  },
 };
 
 /**
@@ -138,18 +148,24 @@ function applyPmxMood(mesh, mood) {
 // Live2D 로드
 // ---------------------------------------------------------------------------
 
-function fitLive2dModel(model, container) {
+function fitLive2dModel(model, container, viewport = {}) {
   const bounds = model.getLocalBounds();
   const targetWidth  = Math.max(container.clientWidth  * 0.78, 1);
   const targetHeight = Math.max(container.clientHeight * 0.9, 1);
-  const scale = Math.min(
-    targetWidth  / Math.max(bounds.width,  1),
+  const baseScale = Math.min(
+    targetWidth / Math.max(bounds.width, 1),
     targetHeight / Math.max(bounds.height, 1)
   );
+  const scale = baseScale * (viewport.scale ?? 1);
+  const offsetX =
+    (((viewport.positionX ?? 50) - 50) / 50) * container.clientWidth * 0.36;
+  const offsetY =
+    (((viewport.positionY ?? 50) - 50) / 50) * container.clientHeight * 0.44;
 
   model.scale.set(scale);
-  model.x = container.clientWidth  / 2 - (bounds.x + bounds.width  / 2) * scale;
-  model.y = container.clientHeight     - (bounds.y + bounds.height) * scale;
+  model.x =
+    container.clientWidth / 2 - (bounds.x + bounds.width / 2) * scale + offsetX;
+  model.y = container.clientHeight - (bounds.y + bounds.height) * scale + offsetY;
 }
 
 let cubismCorePromise = null;
@@ -159,27 +175,42 @@ async function ensureLive2dCubismCore(resolveAssetUrl) {
 
   if (!cubismCorePromise) {
     cubismCorePromise = (async () => {
-      const candidate = "assets/live2d/live2dcubismcore.min.js";
-      const assetUrl = await resolveAssetUrl(candidate);
-      if (!assetUrl) {
-        throw new Error("Live2D Cubism Core not found. Put live2dcubismcore.min.js in assets/live2d/.");
-      }
+      const candidates = ["assets/live2d/live2dcubismcore.min.js"];
 
-      await new Promise((resolve, reject) => {
-        const existing = document.querySelector(`script[data-live2d-core="${candidate}"]`);
-        if (existing) {
-          existing.addEventListener("load", resolve, { once: true });
-          existing.addEventListener("error", reject, { once: true });
+      for (const candidate of candidates) {
+        const assetUrl = await resolveAssetUrl(candidate);
+        if (!assetUrl) {
+          continue;
+        }
+
+        try {
+          await new Promise((resolve, reject) => {
+            const existing = document.querySelector(
+              `script[data-live2d-core="${candidate}"]`
+            );
+            if (existing) {
+              existing.addEventListener("load", resolve, { once: true });
+              existing.addEventListener("error", reject, { once: true });
+              return;
+            }
+
+            const script = document.createElement("script");
+            script.src = assetUrl;
+            script.async = true;
+            script.dataset.live2dCore = candidate;
+            script.onload = () => resolve();
+            script.onerror = () =>
+              reject(new Error(`Failed to load Live2D core: ${candidate}`));
+            document.head.appendChild(script);
+          });
+        } catch {
+          continue;
+        }
+
+        if (window.Live2DCubismCore) {
           return;
         }
-        const script = document.createElement("script");
-        script.src = assetUrl;
-        script.async = true;
-        script.dataset.live2dCore = candidate;
-        script.onload  = () => resolve();
-        script.onerror = () => reject(new Error(`Failed to load Live2D core: ${candidate}`));
-        document.head.appendChild(script);
-      });
+      }
 
       if (!window.Live2DCubismCore) {
         throw new Error("Live2D Cubism Core loaded but Live2DCubismCore not found on window.");
@@ -193,25 +224,24 @@ async function ensureLive2dCubismCore(resolveAssetUrl) {
 async function loadLive2dModel(container, modelUrl) {
   const PIXI = await import("pixi.js");
   window.PIXI = PIXI;
-  await ensureLive2dCubismCore(async (relativePath) =>
-    window.hanaDesktop?.resolveAssetUrl?.(relativePath) || ""
+  await ensureLive2dCubismCore(
+    async (relativePath) => window.hanaDesktop?.resolveAssetUrl?.(relativePath) || ""
   );
   const { Live2DModel } = await import("pixi-live2d-display/cubism4");
   Live2DModel.registerTicker(PIXI.Ticker);
 
   const app = new PIXI.Application({
-    width:           container.clientWidth,
-    height:          container.clientHeight,
-    antialias:       true,
-    autoStart:       true,
-    backgroundAlpha: 0
+    width: container.clientWidth,
+    height: container.clientHeight,
+    antialias: true,
+    autoStart: true,
+    backgroundAlpha: 0,
   });
   app.renderer.resize(container.clientWidth, container.clientHeight);
   container.appendChild(app.view);
 
   const model = await Live2DModel.from(modelUrl);
   app.stage.addChild(model);
-  fitLive2dModel(model, container);
 
   // expression 목록을 인스턴스에 캐시
   const expressionIds = getModelExpressionIds(model);
@@ -223,47 +253,78 @@ async function loadLive2dModel(container, modelUrl) {
     // Idle 모션 없는 모델은 무시
   }
 
-  const resize = () => {
-    app.renderer.resize(container.clientWidth, container.clientHeight);
-    fitLive2dModel(model, container);
-  };
-  const resizeObserver =
-    typeof ResizeObserver === "function" ? new ResizeObserver(resize) : null;
-  resizeObserver?.observe(container);
-
-  return {
+  const instance = {
     type: "live2d",
     model,
     expressionIds,
+    viewport: { positionX: 50, positionY: 50, scale: 1 },
+    applyViewport(nextViewport = instance.viewport) {
+      instance.viewport = { ...instance.viewport, ...nextViewport };
+      fitLive2dModel(model, container, instance.viewport);
+    },
     cleanup() {
       resizeObserver?.disconnect();
       app.destroy(true, true);
       delete window.PIXI;
-    }
+    },
   };
+
+  instance.applyViewport();
+
+  const resize = () => {
+    app.renderer.resize(container.clientWidth, container.clientHeight);
+    instance.applyViewport();
+  };
+
+  const resizeObserver =
+    typeof ResizeObserver === "function" ? new ResizeObserver(resize) : null;
+  resizeObserver?.observe(container);
+
+  return instance;
 }
 
 // ---------------------------------------------------------------------------
-// PMX 로드 (기존 유지)
+// PMX 로드
 // ---------------------------------------------------------------------------
 
-function fitPmxModel(mesh, camera, container, THREE) {
-  const box    = new THREE.Box3().setFromObject(mesh);
-  const size   = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  const largest   = Math.max(size.x, size.y, size.z, 1);
-  const distance  = largest * 1.55;
+function fitPmxModel(instance, camera, container, THREE, viewport = {}) {
+  const metrics = instance.metrics;
+  const mesh = instance.model;
+  const size = metrics.size;
+  const scale = viewport.scale ?? 1;
+  const largest = Math.max(size.x, size.y, size.z, 1);
+  const aspect = Math.max(container.clientWidth, 1) / Math.max(container.clientHeight, 1);
+  const vFov = THREE.MathUtils.degToRad(camera.fov);
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
 
-  mesh.position.sub(center);
-  mesh.rotation.y = 0;
-  camera.position.set(0, largest * 0.12, distance);
-  camera.lookAt(0, largest * 0.08, 0);
+  // PMX should default to face/upper-body framing, not full-body center.
+  const focusX = metrics.center.x;
+  const focusY = metrics.minY + size.y * 0.76;
+  const focusZ = metrics.center.z;
+  const framedWidth = Math.max(size.x * scale * 0.78, 1);
+  const framedHeight = Math.max(size.y * scale * 0.58, 1);
+  const fitDistance = Math.max(
+    (framedWidth / 2) / Math.tan(hFov / 2),
+    (framedHeight / 2) / Math.tan(vFov / 2)
+  );
+  const distance = fitDistance * 1.18;
+  const offsetX = (((viewport.positionX ?? 50) - 50) / 50) * size.x * scale * 0.22;
+  const offsetY = (((viewport.positionY ?? 50) - 50) / 50) * size.y * scale * 0.28;
+
+  mesh.position.set(-focusX + offsetX, -focusY - offsetY, -focusZ);
+  mesh.scale.setScalar(scale);
+  mesh.rotation.set(0, 0, 0);
+  camera.position.set(0, 0, distance);
+  camera.lookAt(0, 0, 0);
+  camera.near = 0.1;
+  camera.far = Math.max(distance + largest * 6, 2000);
+  camera.updateProjectionMatrix();
 }
 
 async function loadPmxModel(container, modelUrl) {
   const [THREE, { MMDLoader }] = await Promise.all([
     import("three"),
-    import("three/examples/jsm/loaders/MMDLoader.js")
+    import("three/examples/jsm/loaders/MMDLoader.js"),
   ]);
 
   const scene    = new THREE.Scene();
@@ -273,7 +334,10 @@ async function loadPmxModel(container, modelUrl) {
     0.1,
     2000
   );
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  const renderer = new THREE.WebGLRenderer({
+    alpha: true,
+    antialias: true,
+  });
   renderer.setClearColor(0x000000, 0);
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(container.clientWidth, container.clientHeight);
@@ -290,13 +354,38 @@ async function loadPmxModel(container, modelUrl) {
   });
 
   scene.add(mesh);
-  fitPmxModel(mesh, camera, container, THREE);
+  const baseBox = new THREE.Box3().setFromObject(mesh);
+  const baseSize = baseBox.getSize(new THREE.Vector3());
+  const baseCenter = baseBox.getCenter(new THREE.Vector3());
 
   let animationFrameId = 0;
   const render = () => {
     renderer.render(scene, camera);
     animationFrameId = window.requestAnimationFrame(render);
   };
+
+  const instance = {
+    type: "pmx",
+    model: mesh,
+    metrics: {
+      center: baseCenter.clone(),
+      minY: baseBox.min.y,
+      size: baseSize.clone(),
+    },
+    viewport: { positionX: 50, positionY: 50, scale: 1 },
+    applyViewport(nextViewport = instance.viewport) {
+      instance.viewport = { ...instance.viewport, ...nextViewport };
+      fitPmxModel(instance, camera, container, THREE, instance.viewport);
+    },
+    cleanup() {
+      resizeObserver?.disconnect();
+      window.cancelAnimationFrame(animationFrameId);
+      renderer.dispose();
+      scene.clear();
+    },
+  };
+
+  instance.applyViewport();
   render();
 
   const resize = () => {
@@ -304,22 +393,15 @@ async function loadPmxModel(container, modelUrl) {
       Math.max(container.clientWidth, 1) / Math.max(container.clientHeight, 1);
     camera.updateProjectionMatrix();
     renderer.setSize(container.clientWidth, container.clientHeight);
+    instance.applyViewport();
     renderer.render(scene, camera);
   };
+
   const resizeObserver =
     typeof ResizeObserver === "function" ? new ResizeObserver(resize) : null;
   resizeObserver?.observe(container);
 
-  return {
-    type: "pmx",
-    model: mesh,
-    cleanup() {
-      resizeObserver?.disconnect();
-      window.cancelAnimationFrame(animationFrameId);
-      renderer.dispose();
-      scene.clear();
-    }
-  };
+  return instance;
 }
 
 // ---------------------------------------------------------------------------
@@ -360,4 +442,8 @@ export function applyGaze(instance, x, y) {
     instance.model.rotation.x = y * 0.3;
     instance.model.rotation.y = x * 0.3;
   }
+}
+
+export function applyViewportTransform(instance, viewport) {
+  instance?.applyViewport?.(viewport);
 }

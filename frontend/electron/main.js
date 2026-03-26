@@ -1,7 +1,6 @@
 const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
-const Store = require("electron-store");
 const {
   app,
   BrowserWindow,
@@ -13,13 +12,19 @@ const {
   Tray
 } = require("electron");
 
-const store = new Store();
+let store = null;
 const DEFAULT_SHORTCUT = "Alt+H";
 const DEFAULT_APP_SETTINGS = {
   app: {
     theme: "dark-anime",
     shortcut: DEFAULT_SHORTCUT,
     autoLaunch: false
+  },
+  character: {
+    viewportScale: 100,
+    positionX: 50,
+    positionY: 50,
+    opacity: 100
   },
   integrations: {
     serper: { status: "grey", apiKey: "" },
@@ -38,20 +43,47 @@ const DEFAULT_APP_SETTINGS = {
 
 const WINDOW_ROUTES = {
   bubble: "bubble",
+  charPosition: "charPosition",
   character: "character",
   main: "main"
 };
 
 const BUBBLE_SIZE = { width: 220, height: 90 };
-const MAIN_WINDOW_SIZE = { width: 480, height: 680 };
+const MAIN_WINDOW_SIZE = { width: 420, height: 640 };
 const SNAP = 40;
+const CHARACTER_SIZE_MAP = {
+  S: { w: 200, h: 350 },
+  M: { w: 300, h: 500 },
+  L: { w: 400, h: 650 },
+  XL: { w: 500, h: 800 }
+};
 
 let bubbleWindow = null;
+let charPositionWindow = null;
 let characterWindow = null;
 let mainWindow = null;
 let tray = null;
 let ipcRegistered = false;
 let shortcutsRegistered = false;
+
+function isWindowUsable(targetWindow) {
+  return Boolean(targetWindow) && !targetWindow.isDestroyed?.();
+}
+
+if (process.env.NODE_ENV === "test") {
+  const Store = require("electron-store");
+  store = new Store();
+}
+
+async function initializeStore() {
+  if (store) {
+    return store;
+  }
+
+  const { default: Store } = await import("electron-store");
+  store = new Store();
+  return store;
+}
 
 function getRendererEntry(route) {
   if (!app.isPackaged) {
@@ -98,7 +130,7 @@ function resolveAssetUrl(relativePath) {
 }
 
 function toggleWindowVisibility(targetWindow) {
-  if (!targetWindow) {
+  if (!isWindowUsable(targetWindow)) {
     return false;
   }
 
@@ -113,7 +145,11 @@ function toggleWindowVisibility(targetWindow) {
 }
 
 function showMainWindow(tab = "chat") {
-  if (!mainWindow) {
+  if (!isWindowUsable(mainWindow)) {
+    createMainWindow();
+  }
+
+  if (!isWindowUsable(mainWindow)) {
     return false;
   }
 
@@ -148,12 +184,16 @@ function createOverlayWindow(route, options) {
 
 function createMainWindow() {
   const display = screen.getPrimaryDisplay();
+  const savedSize = store.get("mainWindowSize");
 
   mainWindow = new BrowserWindow({
-    width: MAIN_WINDOW_SIZE.width,
-    height: MAIN_WINDOW_SIZE.height,
+    width: savedSize?.width ?? MAIN_WINDOW_SIZE.width,
+    height: savedSize?.height ?? MAIN_WINDOW_SIZE.height,
+    minWidth: 360,
+    minHeight: 560,
+    maxWidth: 600,
     frame: false,
-    resizable: false,
+    resizable: true,
     skipTaskbar: false,
     focusable: true,
     show: false,
@@ -173,6 +213,13 @@ function createMainWindow() {
   mainWindow.on("move", () => {
     const [x, y] = mainWindow.getPosition();
     store.set("mainWindowPos", { x, y });
+  });
+  mainWindow.on("resize", () => {
+    const [width, height] = mainWindow.getSize();
+    store.set("mainWindowSize", { width, height });
+  });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
   });
 
   if (!app.isPackaged) {
@@ -265,24 +312,89 @@ function showBubble(payload) {
 
 function createCharacterWindow() {
   const display = screen.getPrimaryDisplay();
-  const width = 300;
-  const height = 400;
+  const savedPosition = store.get("charPosition") || { x: 88, y: 50, size: "M" };
+  const viewportScale = Math.max(
+    0.5,
+    Math.min(2, Number(getStoredAppSettings().character?.viewportScale || 100) / 100)
+  );
+  const selectedSize = CHARACTER_SIZE_MAP[savedPosition.size] || CHARACTER_SIZE_MAP.M;
+  const width = Math.round(selectedSize.w * viewportScale);
+  const height = Math.round(selectedSize.h * viewportScale);
+  const x = Math.round((savedPosition.x / 100) * (display.workArea.width - width));
+  const y = Math.round((savedPosition.y / 100) * (display.workArea.height - height));
 
   characterWindow = createOverlayWindow(WINDOW_ROUTES.character, {
     width,
     height,
-    x: display.workArea.x + display.workArea.width - width - 24,
-    y: display.workArea.y + display.workArea.height - height - 24,
+    x: display.workArea.x + x,
+    y: display.workArea.y + y,
     focusable: false,
     hasShadow: false,
     resizable: false,
     skipTaskbar: true
   });
 
+  characterWindow.setOpacity?.((getStoredAppSettings().character.opacity || 100) / 100);
   characterWindow.setIgnoreMouseEvents(true, { forward: true });
   characterWindow.on("move", () => {
     syncBubblePosition();
   });
+  characterWindow.on("closed", () => {
+    characterWindow = null;
+  });
+}
+
+function persistCharacterWindowPlacement(bounds) {
+  if (!bounds) {
+    return;
+  }
+
+  const display = getCharacterDisplay();
+  const widthRange = Math.max(display.workArea.width - bounds.width, 0);
+  const heightRange = Math.max(display.workArea.height - bounds.height, 0);
+  const normalizedX = widthRange === 0 ? 0 : ((bounds.x - display.workArea.x) / widthRange) * 100;
+  const normalizedY = heightRange === 0 ? 0 : ((bounds.y - display.workArea.y) / heightRange) * 100;
+  const previousCharPosition = store.get("charPosition") || { x: 88, y: 50, size: "M" };
+
+  store.set("charPosition", {
+    ...previousCharPosition,
+    x: Math.max(0, Math.min(100, Math.round(normalizedX))),
+    y: Math.max(0, Math.min(100, Math.round(normalizedY)))
+  });
+}
+
+function createCharPositionWindow() {
+  if (charPositionWindow) {
+    charPositionWindow.show();
+    charPositionWindow.focus();
+    return charPositionWindow;
+  }
+
+  charPositionWindow = new BrowserWindow({
+    width: 260,
+    height: 420,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    backgroundColor: "#0f0f14",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, "preload.js")
+    }
+  });
+
+  if (!app.isPackaged) {
+    charPositionWindow.loadURL(getRendererEntry(WINDOW_ROUTES.charPosition));
+  } else {
+    charPositionWindow.loadFile(getRendererEntry(WINDOW_ROUTES.main), {
+      hash: `/${WINDOW_ROUTES.charPosition}`
+    });
+  }
+  charPositionWindow.on("closed", () => {
+    charPositionWindow = null;
+  });
+  return charPositionWindow;
 }
 
 function createBubbleWindow() {
@@ -297,6 +409,9 @@ function createBubbleWindow() {
   });
 
   bubbleWindow.setIgnoreMouseEvents(true, { forward: true });
+  bubbleWindow.on("closed", () => {
+    bubbleWindow = null;
+  });
 }
 
 function createTray() {
@@ -347,6 +462,11 @@ function moveCharacterWindowBy(deltaX, deltaY) {
   );
 
   characterWindow.setPosition(Math.round(next.x), Math.round(next.y));
+  persistCharacterWindowPlacement({
+    ...bounds,
+    x: Math.round(next.x),
+    y: Math.round(next.y)
+  });
   return { ...bounds, ...next };
 }
 
@@ -367,6 +487,11 @@ function finishCharacterDrag() {
   );
 
   characterWindow.setPosition(Math.round(next.x), Math.round(next.y));
+  persistCharacterWindowPlacement({
+    ...bounds,
+    x: Math.round(next.x),
+    y: Math.round(next.y)
+  });
   return { ...bounds, ...next };
 }
 
@@ -387,6 +512,117 @@ function registerIpcHandlers() {
     }
 
     return saved;
+  });
+  ipcMain.on("window-minimize", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+  ipcMain.on("window-hide", (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.hide();
+  });
+  ipcMain.on("settings-saved", (_event, payload) => {
+    const current = getStoredAppSettings();
+    saveStoredAppSettings({
+      ...current,
+      app: {
+        ...current.app,
+        theme: payload?.theme ?? current.app.theme,
+        autoLaunch: payload?.autoLaunch ?? current.app.autoLaunch
+      }
+    });
+  });
+  ipcMain.on("set-auto-launch", (_event, value) => {
+    if (typeof app.setLoginItemSettings === "function") {
+      app.setLoginItemSettings({ openAtLogin: Boolean(value) });
+    }
+  });
+  ipcMain.on("char-viewport-size", (_event, value) => {
+    if (!characterWindow) {
+      return;
+    }
+    const scale = Math.max(0.5, Math.min(2, Number(value || 100) / 100));
+    const savedPosition = store.get("charPosition") || { x: 88, y: 50, size: "M" };
+    const baseSize = CHARACTER_SIZE_MAP[savedPosition.size] || CHARACTER_SIZE_MAP.M;
+    const display = getCharacterDisplay();
+    const currentBounds = characterWindow.getBounds();
+    const nextWidth = Math.round(baseSize.w * scale);
+    const nextHeight = Math.round(baseSize.h * scale);
+    const clampedX = Math.max(
+      display.workArea.x,
+      Math.min(display.workArea.x + display.workArea.width - nextWidth, currentBounds.x)
+    );
+    const clampedY = Math.max(
+      display.workArea.y,
+      Math.min(display.workArea.y + display.workArea.height - nextHeight, currentBounds.y)
+    );
+
+    characterWindow.setSize(nextWidth, nextHeight);
+    characterWindow.setPosition(clampedX, clampedY);
+    persistCharacterWindowPlacement({
+      ...currentBounds,
+      width: nextWidth,
+      height: nextHeight,
+      x: clampedX,
+      y: clampedY
+    });
+  });
+  ipcMain.on("char-viewport-opacity", (_event, value) => {
+    characterWindow?.setOpacity?.(Math.max(0.2, Math.min(1, Number(value || 100) / 100)));
+  });
+  ipcMain.on("open-char-position-popup", () => {
+    createCharPositionWindow();
+  });
+  ipcMain.handle("char-position-apply", (_event, payload) => {
+    if (!characterWindow) {
+      return null;
+    }
+    const current = getStoredAppSettings();
+    const viewportScale = Math.max(0.5, Math.min(2, Number(current.character?.viewportScale || 100) / 100));
+    const selectedBaseSize = CHARACTER_SIZE_MAP[payload?.size] || CHARACTER_SIZE_MAP.M;
+    const selectedSize = {
+      w: Math.round(selectedBaseSize.w * viewportScale),
+      h: Math.round(selectedBaseSize.h * viewportScale)
+    };
+    const previousCharPosition = store.get("charPosition") || { x: 88, y: 50, size: "M" };
+    const saved = saveStoredAppSettings({
+      ...current,
+      character: {
+        ...current.character,
+        positionX: Number(payload?.x ?? current.character.positionX ?? 50),
+        positionY: Number(payload?.y ?? current.character.positionY ?? 50)
+      }
+    });
+    const display = getCharacterDisplay();
+    const currentBounds = characterWindow.getBounds();
+    const clampedX = Math.max(
+      display.workArea.x,
+      Math.min(display.workArea.x + display.workArea.width - selectedSize.w, currentBounds.x)
+    );
+    const clampedY = Math.max(
+      display.workArea.y,
+      Math.min(display.workArea.y + display.workArea.height - selectedSize.h, currentBounds.y)
+    );
+    const sizeChanged =
+      currentBounds.width !== selectedSize.w || currentBounds.height !== selectedSize.h;
+
+    if (sizeChanged) {
+      characterWindow.setSize(selectedSize.w, selectedSize.h);
+      characterWindow.setPosition(clampedX, clampedY);
+      persistCharacterWindowPlacement({
+        ...currentBounds,
+        width: selectedSize.w,
+        height: selectedSize.h,
+        x: clampedX,
+        y: clampedY
+      });
+    }
+
+    store.set("charPosition", {
+      ...(store.get("charPosition") || previousCharPosition),
+      size: payload?.size || previousCharPosition.size
+    });
+    characterWindow.webContents.send("character-settings-updated", saved.character);
+    syncBubblePosition(true);
+    return saved.character;
   });
   ipcMain.handle("assets:resolve-url", (_event, relativePath) =>
     resolveAssetUrl(relativePath)
@@ -409,10 +645,23 @@ function registerIpcHandlers() {
     return true;
   });
   ipcMain.handle("window:close", (event) => {
-    BrowserWindow.fromWebContents(event.sender)?.hide();
+    const targetWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!targetWindow) {
+      return;
+    }
+
+    if (targetWindow === mainWindow) {
+      targetWindow.hide();
+      return;
+    }
+
+    targetWindow.close();
   });
   ipcMain.handle("app:quit", () => app.quit());
   ipcMain.handle("character:get-bounds", () => characterWindow?.getBounds() || null);
+  ipcMain.handle("character:get-window-placement", () =>
+    store.get("charPosition") || { x: 88, y: 50, size: "M" }
+  );
   ipcMain.handle("character:get-state", () => ({
     pinned: store.get("characterPinned", false)
   }));
@@ -420,6 +669,26 @@ function registerIpcHandlers() {
     moveCharacterWindowBy(deltaX, deltaY)
   );
   ipcMain.handle("character:finish-drag", () => finishCharacterDrag());
+  ipcMain.on("character:drag-start", () => {
+    if (!characterWindow) {
+      return;
+    }
+
+    characterWindow.setIgnoreMouseEvents(false);
+    if (typeof characterWindow.setFocusable === "function") {
+      characterWindow.setFocusable(true);
+    }
+  });
+  ipcMain.on("character:drag-end", () => {
+    if (!characterWindow) {
+      return;
+    }
+
+    if (typeof characterWindow.setFocusable === "function") {
+      characterWindow.setFocusable(false);
+    }
+    characterWindow.setIgnoreMouseEvents(true, { forward: true });
+  });
   ipcMain.handle("character:toggle-pin", () => {
     const nextPinned = !store.get("characterPinned", false);
     store.set("characterPinned", nextPinned);
@@ -482,7 +751,8 @@ function createWindows() {
 }
 
 if (process.env.NODE_ENV !== "test") {
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    await initializeStore();
     createWindows();
 
     app.on("activate", () => {
