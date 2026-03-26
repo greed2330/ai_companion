@@ -16,6 +16,7 @@ from backend.routers.memory import router as memory_router
 from backend.routers.mood import router as mood_router
 from backend.routers.proactive import router as proactive_router
 from backend.routers.settings import router as settings_router
+from backend.routers.voice import router as voice_router
 from backend.services.model_context_service import load_cached_context
 
 
@@ -70,3 +71,4 @@ app.include_router(memory_router)
 app.include_router(mood_router)
 app.include_router(proactive_router)
 app.include_router(settings_router)
+app.include_router(voice_router)
