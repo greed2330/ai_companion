@@ -10,15 +10,21 @@ function CharacterScreen() {
   const [mood, setMood] = useState("IDLE");
   const [models, setModels] = useState([]);
   const [currentModelId, setCurrentModelId] = useState(null);
+  const [viewportScale, setViewportScale] = useState(1);
 
   useEffect(() => {
-    async function loadModels() {
-      const payload = await fetchModels();
+    fetchModels().then((payload) => {
       setModels(payload.models || []);
       setCurrentModelId(payload.current || null);
-    }
+    });
 
-    loadModels();
+    // Load persisted viewport scale from electron-store
+    window.hanaDesktop?.getAppSettings?.().then((appSettings) => {
+      const pct = appSettings?.character?.viewportScale;
+      if (pct != null) {
+        setViewportScale(pct / 100);
+      }
+    });
   }, []);
 
   useMoodStream({
@@ -38,6 +44,9 @@ function CharacterScreen() {
       if (event.data?.type === "character_model_selected") {
         setCurrentModelId(event.data.modelId || null);
       }
+      if (event.data?.type === "viewport_scale_changed") {
+        setViewportScale(event.data.scale ?? 1);
+      }
     };
 
     return () => channel.close();
@@ -48,6 +57,7 @@ function CharacterScreen() {
 
   return (
     <CharacterOverlay
+      initialScale={viewportScale}
       mood={mood}
       modelName={activeModel?.name || "하나"}
       modelPath={activeModel?.path || ""}

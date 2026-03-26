@@ -10,8 +10,14 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   closeWindow() {
     return ipcRenderer.invoke("window:close");
   },
+  endCharacterDrag() {
+    ipcRenderer.send("char-drag-end");
+  },
   finishCharacterDrag() {
     return ipcRenderer.invoke("character:finish-drag");
+  },
+  startCharacterDrag() {
+    ipcRenderer.send("char-drag-start");
   },
   getAppSettings() {
     return ipcRenderer.invoke("app-settings:get");
