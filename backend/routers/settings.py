@@ -23,8 +23,10 @@ from backend.services.model_context_service import (
 )
 from backend.services.mood import push_event
 from backend.services.settings_service import (
+    get_autonomous,
     get_current_chat_model,
     get_persona,
+    set_autonomous,
     set_current_chat_model,
     set_persona,
 )
@@ -374,6 +376,32 @@ async def disconnect_protocol() -> dict:
     llm_router.source = "ollama"
     logger.info("/settings/llm/protocol DELETE: disconnected")
     return {"success": True, "protocol_connected": False}
+
+
+# ── 자율 행동 토글 엔드포인트 ────────────────────────────────────
+
+
+@router.get("/settings/autonomous")
+async def get_autonomous_settings() -> dict:
+    """현재 자율 행동 토글 상태를 반환한다."""
+    return get_autonomous()
+
+
+class AutonomousRequest(BaseModel):
+    proactive_chat: bool | None = None
+    tip_bubbles: bool | None = None
+    screen_reaction: bool | None = None
+    schedule_reminder: bool | None = None
+    auto_crawl: bool | None = None
+
+
+@router.post("/settings/autonomous")
+async def update_autonomous(req: AutonomousRequest) -> dict:
+    """자율 행동 토글을 부분 업데이트한다. 변경할 필드만 전송해도 된다."""
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    merged = set_autonomous(updates)
+    logger.info("/settings/autonomous POST: %s", updates)
+    return {"success": True, "autonomous": merged}
 
 
 # ── 모델 컨텍스트 엔드포인트 ─────────────────────────────────────

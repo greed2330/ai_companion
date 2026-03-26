@@ -107,3 +107,44 @@ def set_persona(persona_data: dict) -> None:
     data["persona"] = merged
     _write_settings(data)
     logger.info(f"settings: persona updated, ai_name={merged.get('ai_name')}")
+
+
+# ---------------------------------------------------------------------------
+# 자율 행동 토글
+# ---------------------------------------------------------------------------
+
+_DEFAULT_AUTONOMOUS: dict = {
+    "proactive_chat": False,
+    "tip_bubbles": True,
+    "screen_reaction": True,
+    "schedule_reminder": False,
+    "auto_crawl": False,
+}
+
+_autonomous_cache: Optional[dict] = None
+
+
+def get_autonomous() -> dict:
+    """현재 자율 행동 토글 설정을 반환한다. in-memory → settings.json → 기본값 순."""
+    if _autonomous_cache is not None:
+        return dict(_autonomous_cache)
+
+    data = _read_settings()
+    if autonomous := data.get("autonomous"):
+        return {**_DEFAULT_AUTONOMOUS, **autonomous}
+
+    return dict(_DEFAULT_AUTONOMOUS)
+
+
+def set_autonomous(updates: dict) -> dict:
+    """자율 행동 토글을 부분 업데이트한다. 변경된 전체 상태를 반환한다."""
+    global _autonomous_cache
+    current = get_autonomous()
+    merged = {**current, **updates}
+    _autonomous_cache = merged
+
+    data = _read_settings()
+    data["autonomous"] = merged
+    _write_settings(data)
+    logger.info(f"settings: autonomous updated: {merged}")
+    return merged
