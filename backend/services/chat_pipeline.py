@@ -231,6 +231,18 @@ async def _background_process(
         except (ImportError, Exception):
             pass
 
+        # Celery: LLM 자동 채점 (fire-and-forget)
+        try:
+            from backend.tasks.score_tasks import score_message
+            score_message.delay(
+                message_id=assistant_msg_id,
+                user_message=original_message,
+                assistant_response=full_response,
+                interaction_type=interaction_type,
+            )
+        except Exception as score_exc:
+            logger.warning("score_message.delay failed: %s", score_exc)
+
         logger.info(
             "_background_process: cid=%s emotion=%s mood=%s",
             conversation_id, parsed.emotion, new_mood,
