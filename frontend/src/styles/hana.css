@@ -563,6 +563,16 @@ button, input, select, textarea { font: inherit; }
   padding: 12px;
   overflow-y: auto;
 }
+.popup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--hana-border);
+  background: var(--hana-surface);
+  flex-shrink: 0;
+}
 .char-ctrl-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .char-ctrl-label { font-size: 11px; color: var(--hana-muted); width: 40px; }
 .snap-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 10px; }

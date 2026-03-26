@@ -102,22 +102,22 @@ function CharacterPositionPopup() {
           ))}
         </div>
 
-        <div className="btn-row">
-          <button
-            className="btn btn-ghost btn-sm"
-            type="button"
-            onClick={() => {
-              setX(50);
-              setY(50);
-              setSize("M");
-            }}
-          >
-            기본값
-          </button>
-          <button className="btn btn-primary btn-sm" type="button" onClick={handleApply}>
-            적용
-          </button>
-        </div>
+      </div>
+      <div className="popup-footer">
+        <button
+          className="btn btn-ghost btn-sm"
+          type="button"
+          onClick={() => {
+            setX(50);
+            setY(50);
+            setSize("M");
+          }}
+        >
+          기본값
+        </button>
+        <button className="btn btn-primary btn-sm" type="button" onClick={handleApply}>
+          적용
+        </button>
       </div>
     </div>
   );
