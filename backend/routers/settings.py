@@ -1,13 +1,15 @@
 """
 설정 라우터.
-GET  /settings/models          — assets/character/ 스캔, Live2D + PMX 모델 목록 반환
-POST /settings/models/select   — 현재 캐릭터 모델 변경 + /mood/stream push
-GET  /settings/llm/models      — Ollama 설치 모델 목록 + 현재 챗 모델 반환
-POST /settings/llm/select      — 챗 모델 변경
+GET  /settings/models                        — assets/character/ 스캔, Live2D + PMX 모델 목록 반환
+POST /settings/models/select                 — 현재 캐릭터 모델 변경 + /mood/stream push
+GET  /settings/llm/models                    — Ollama 설치 모델 목록 + 현재 챗 모델 반환
+POST /settings/llm/select                    — 챗 모델 변경
+POST /settings/integrations/{name}/test      — 외부 연동 API 키 연결 테스트
 """
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -424,3 +426,73 @@ async def get_model_context() -> dict:
             },
         )
     return ctx
+
+
+# ── 외부 연동 테스트 엔드포인트 ───────────────────────────────────
+
+_INTEGRATION_HANDLERS: dict[str, str] = {
+    "serper":           "https://google.serper.dev/search",
+    "google_calendar":  "",    # OAuth 필요 — ping 불가
+    "github":           "https://api.github.com/user",
+}
+
+
+class IntegrationTestRequest(BaseModel):
+    api_key: str
+
+
+@router.post("/settings/integrations/{name}/test")
+async def test_integration(name: str, req: IntegrationTestRequest) -> dict:
+    """
+    외부 연동 API 키 연결을 테스트한다. 저장하지 않음.
+    성공 시: {"success": true, "response_ms": <int>}
+    실패 시: {"success": false, "error": "<message>"}
+    """
+    if name not in _INTEGRATION_HANDLERS:
+        raise HTTPException(status_code=404, detail={
+            "error": True,
+            "code": "UNKNOWN_INTEGRATION",
+            "message": f"'{name}' 연동은 지원하지 않아.",
+        })
+
+    if not req.api_key:
+        return {"success": False, "error": "API 키가 없어."}
+
+    # google_calendar는 OAuth 흐름 필요 — 단순 ping 불가
+    if name == "google_calendar":
+        return {"success": False, "error": "Google Calendar는 OAuth 인증이 필요해. (Phase 4에서 지원)"}
+
+    endpoint = _INTEGRATION_HANDLERS[name]
+    headers: dict[str, str] = {}
+
+    if name == "serper":
+        headers = {"X-API-KEY": req.api_key, "Content-Type": "application/json"}
+        body = {"q": "test", "num": 1}
+    elif name == "github":
+        headers = {"Authorization": f"token {req.api_key}", "Accept": "application/vnd.github.v3+json"}
+        body = None
+
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if name == "serper":
+                resp = await client.post(endpoint, headers=headers, json=body)
+            else:
+                resp = await client.get(endpoint, headers=headers)
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+
+        if resp.status_code in (200, 201):
+            logger.info(f"/settings/integrations/{name}/test: success ({elapsed_ms}ms)")
+            return {"success": True, "response_ms": elapsed_ms}
+
+        logger.warning(f"/settings/integrations/{name}/test: HTTP {resp.status_code}")
+        return {"success": False, "error": f"HTTP {resp.status_code}"}
+
+    except httpx.TimeoutException:
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        logger.warning(f"/settings/integrations/{name}/test: timeout after {elapsed_ms}ms")
+        return {"success": False, "error": "연결 시간 초과"}
+    except Exception as e:
+        logger.error(f"/settings/integrations/{name}/test: {e}")
+        return {"success": False, "error": str(e)}
