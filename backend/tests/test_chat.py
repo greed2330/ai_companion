@@ -7,7 +7,7 @@ import json
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +17,8 @@ def use_tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", db_file)
     import backend.models.schema as schema_mod
     monkeypatch.setattr(schema_mod, "DB_PATH", db_file)
+    import backend.services.chat_pipeline as cp_mod
+    monkeypatch.setattr(cp_mod, "DB_PATH", db_file)
     import backend.routers.chat as chat_mod
     monkeypatch.setattr(chat_mod, "DB_PATH", db_file)
     import backend.routers.memory as mem_mod
@@ -62,12 +64,17 @@ def parse_sse(text: str) -> list[dict]:
 @pytest.mark.asyncio
 async def test_chat_happy_path(client):
     """정상 메시지 → SSE 스트림에 token 이벤트와 done 이벤트가 포함된다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, memory_context=None):
+    async def fake_stream(messages, system_prompt, use_think):
         for tok in ["안", "녕", "!"]:
             yield tok
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post("/chat", json={"message": "하나야 안녕"})
 
     assert resp.status_code == 200
@@ -92,12 +99,17 @@ async def test_chat_happy_path(client):
 @pytest.mark.asyncio
 async def test_chat_reuses_conversation_id(client):
     """conversation_id를 지정하면 같은 세션으로 이어진다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, memory_context=None):
+    async def fake_stream(messages, system_prompt, use_think):
         yield "응"
 
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
     conv_id = "test-conv-0001"
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post(
             "/chat", json={"message": "안녕", "conversation_id": conv_id}
         )
@@ -127,12 +139,17 @@ async def test_chat_empty_message_returns_error(client):
 @pytest.mark.asyncio
 async def test_chat_llm_unavailable(client):
     """Ollama 연결 실패 시 SSE error 이벤트를 반환한다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fail_stream(messages, memory_context=None):
+    async def fail_stream(messages, system_prompt, use_think):
         raise RuntimeError("Ollama 연결 실패")
         yield  # AsyncGenerator 타입 만족
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fail_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fail_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post("/chat", json={"message": "안녕"})
 
     assert resp.status_code == 200
@@ -149,11 +166,16 @@ async def test_chat_llm_unavailable(client):
 @pytest.mark.asyncio
 async def test_history_returns_messages(client):
     """대화 후 /history로 메시지를 조회할 수 있다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, memory_context=None):
+    async def fake_stream(messages, system_prompt, use_think):
         yield "응답이야"
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post("/chat", json={"message": "테스트"})
 
     events = parse_sse(resp.text)
@@ -175,11 +197,16 @@ async def test_history_returns_messages(client):
 @pytest.mark.asyncio
 async def test_conversations_list(client):
     """대화 후 /conversations에서 세션이 조회된다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, memory_context=None):
+    async def fake_stream(messages, system_prompt, use_think):
         yield "응"
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         await client.post("/chat", json={"message": "안녕"})
 
     resp = await client.get("/conversations")
@@ -195,11 +222,16 @@ async def test_conversations_list(client):
 @pytest.mark.asyncio
 async def test_feedback_success(client):
     """정상 피드백 요청은 success: true를 반환한다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    async def fake_stream(messages, memory_context=None):
+    async def fake_stream(messages, system_prompt, use_think):
         yield "응"
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         chat_resp = await client.post("/chat", json={"message": "테스트"})
 
     events = parse_sse(chat_resp.text)
@@ -215,6 +247,92 @@ async def test_feedback_invalid_score(client):
     """범위 벗어난 score는 400을 반환한다."""
     resp = await client.post("/feedback", json={"message_id": "any", "score": 10})
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Ollama payload 검증
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chat_ollama_payload(monkeypatch):
+    """stream_chat이 Ollama에 보내는 payload에 think:false가 포함돼야 한다."""
+    import json as _json
+    from backend.services.llm import stream_chat
+
+    captured: dict = {}
+
+    async def fake_aiter_lines():
+        yield _json.dumps({"message": {"content": "안"}, "done": False})
+        yield _json.dumps({"message": {"content": ""}, "done": True})
+
+    class _FakeResponse:
+        status_code = 200
+        def aiter_lines(self):
+            return fake_aiter_lines()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+
+    class _FakeClient:
+        def stream(self, method, url, json=None, **kwargs):
+            captured.update(json or {})
+            return _FakeResponse()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+
+    monkeypatch.setattr("backend.services.llm.httpx.AsyncClient", lambda **_: _FakeClient())
+
+    tokens = [t async for t in stream_chat([{"role": "user", "content": "안녕"}])]
+
+    assert captured.get("think") is False, "think:false 누락 → qwen3 시리즈 400 에러 원인"
+    assert captured.get("stream") is True
+    assert "model" in captured
+    assert "messages" in captured
+    # keep_alive는 정수여야 함 — 문자열 "-1"은 Ollama가 time.ParseDuration 오류 반환
+    assert isinstance(captured.get("keep_alive"), int), "keep_alive must be int, not str"
+
+
+@pytest.mark.asyncio
+async def test_chat_uses_settings_model(monkeypatch):
+    """POST /settings/llm/select 후 /chat이 변경된 모델을 사용해야 한다."""
+    import json as _json
+    from backend.services import settings_service
+
+    captured: dict = {}
+
+    async def fake_aiter_lines():
+        yield _json.dumps({"message": {"content": "응"}, "done": False})
+        yield _json.dumps({"message": {"content": ""}, "done": True})
+
+    class _FakeResponse:
+        status_code = 200
+        def aiter_lines(self):
+            return fake_aiter_lines()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+
+    class _FakeClient:
+        def stream(self, method, url, json=None, **kwargs):
+            captured.update(json or {})
+            return _FakeResponse()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+
+    monkeypatch.setattr("backend.services.llm.httpx.AsyncClient", lambda **_: _FakeClient())
+    monkeypatch.setattr(settings_service, "_current_chat_model", "qwen3:4b")
+
+    from backend.services.llm import stream_chat
+    _ = [t async for t in stream_chat([{"role": "user", "content": "안녕"}])]
+
+    assert captured.get("model") == "qwen3:4b"
 
 
 # ---------------------------------------------------------------------------

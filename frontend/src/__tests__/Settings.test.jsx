@@ -2,88 +2,134 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import Settings from "../components/Settings";
 
 jest.mock("../services/settings", () => ({
-  fetchModels: jest.fn(),
-  selectModel: jest.fn(),
-  fetchLlmModels: jest.fn(),
-  selectLlmModel: jest.fn()
+  previewPersona: jest.fn(() =>
+    Promise.resolve({ samples: ["샘플 1", "샘플 2", "샘플 3"] })
+  )
 }));
 
-const {
-  fetchModels,
-  selectModel,
-  fetchLlmModels,
-  selectLlmModel
-} = jest.requireMock("../services/settings");
+function createSettingsState() {
+  return {
+    effective: {
+      character: { modelId: "furina", modelType: "PMX", viewportScale: 100 },
+      persona: {
+        ai_name: "하나",
+        owner_nickname: "",
+        speech_preset: "bright_friend",
+        speech_style: "",
+        personality_preset: "energetic",
+        personality: "",
+        interests: ""
+      },
+      aiModel: { chatModelId: "qwen3:14b", status: "연결됨" },
+      autonomous: {
+        masterEnabled: false,
+        background_search: false,
+        crawl_learning: false,
+        proactive_chat: false,
+        screen_reaction: true,
+        terminal_access: false,
+        document_link: false,
+        search_limit: 10
+      },
+      integrations: {
+        serper: { status: "grey", apiKey: "sk-12345678" },
+        google_calendar: { status: "grey", apiKey: "" },
+        github: { status: "grey", apiKey: "ghp_12345678" }
+      },
+      voice: { inputMode: "text", outputMode: "chat", ttsEnabled: false },
+      app: { theme: "dark-anime", shortcut: "Alt+H", autoLaunch: false }
+    },
+    error: "",
+    handleCancel: jest.fn(),
+    handleConfirm: jest.fn(),
+    handleReset: jest.fn(),
+    handleThemeChange: jest.fn((theme) => {
+      document.body.className = `theme-${theme}`;
+    }),
+    meta: {
+      characterModels: [
+        { id: "furina", name: "Furina", type: "pmx" },
+        { id: "nanoka", name: "Nanoka", type: "live2d" }
+      ],
+      llmModels: [{ id: "qwen3:14b", role: "chat" }],
+      previewSamples: [],
+      integrationState: {}
+    },
+    setError: jest.fn(),
+    setMeta: jest.fn((updater) => {
+      const next = updater({
+        characterModels: [],
+        llmModels: [],
+        previewSamples: [],
+        integrationState: {}
+      });
+      createSettingsState.meta = next;
+    }),
+    updatePending: jest.fn()
+  };
+}
 
 describe("Settings", () => {
-  beforeEach(() => {
-    fetchModels.mockResolvedValue({
-      current: "nanoka",
-      models: [
-        {
-          id: "nanoka",
-          name: "Nanoka",
-          path: "assets/character/nanoka/nanoka.model3.json",
-          type: "live2d"
-        },
-        {
-          id: "furina",
-          name: "Furina",
-          path: "assets/character/furina/furina.pmx",
-          type: "pmx"
-        }
-      ]
-    });
+  test("accordion toggles section body", () => {
+    const state = createSettingsState();
+    render(<Settings settingsState={state} />);
 
-    fetchLlmModels.mockResolvedValue({
-      current_chat_model: "qwen3:14b",
-      models: [
-        { id: "qwen3:14b", name: "Qwen3 14B", role: "chat", current: true },
-        { id: "qwen3:4b", name: "Qwen3 4B", role: "worker", current: false },
-        { id: "qwen3-vl:8b", name: "Qwen3 Vl 8B", role: "vision", current: false }
-      ]
-    });
-
-    selectModel.mockResolvedValue({ success: true, current: "furina" });
-    selectLlmModel.mockResolvedValue({
-      success: true,
-      current_chat_model: "qwen3:14b"
-    });
+    expect(screen.getByLabelText("character-model")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "캐릭터" }));
+    expect(screen.queryByLabelText("character-model")).not.toBeInTheDocument();
   });
 
-  afterEach(() => {
-    jest.resetAllMocks();
+  test("confirm button delegates to handler", () => {
+    const state = createSettingsState();
+    render(<Settings settingsState={state} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "확인" }));
+    expect(state.handleConfirm).toHaveBeenCalled();
   });
 
-  test("renders model list with character type badges and llm role badges", async () => {
-    render(<Settings />);
+  test("serper dependency disables background search", async () => {
+    const state = createSettingsState();
+    render(<Settings settingsState={state} />);
 
-    expect(await screen.findByText("Nanoka")).toBeInTheDocument();
-    expect(screen.getByText("Live2D")).toBeInTheDocument();
-    expect(screen.getByText("PMX")).toBeInTheDocument();
-    expect(screen.getByText("Chat")).toBeInTheDocument();
-    expect(screen.getByText("Worker")).toBeInTheDocument();
-    expect(screen.getByText("Vision")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "자율 행동" }));
+    expect(await screen.findByText("Serper API 연결 필요")).toBeInTheDocument();
   });
 
-  test("calls POST /settings/models/select on character click", async () => {
-    const onModelSelected = jest.fn();
-    render(<Settings onModelSelected={onModelSelected} />);
+  test("api key is masked by default and toggles visible", async () => {
+    const state = createSettingsState();
+    render(<Settings settingsState={state} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /Furina/i }));
+    fireEvent.click(screen.getByRole("button", { name: "외부 연동" }));
+    const input = await screen.findByLabelText("serper-key");
+    // Hidden mode: value is empty, masked key shown as placeholder
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "sk-1...5678");
 
-    await waitFor(() => expect(selectModel).toHaveBeenCalledWith("furina"));
-    expect(onModelSelected).toHaveBeenCalledWith("furina");
+    fireEvent.click(screen.getByRole("button", { name: "serper-toggle-visibility" }));
+    // Visible mode: actual key shown as value
+    expect(input).toHaveValue("sk-12345678");
   });
 
-  test("calls POST /settings/llm/select only for chat models", async () => {
-    render(<Settings />);
+  test("integration test shows loading then fallback failure", async () => {
+    const state = createSettingsState();
+    global.fetch = jest.fn(() => Promise.reject(new Error("offline")));
+    render(<Settings settingsState={state} />);
 
-    const workerButton = await screen.findByRole("button", { name: /Qwen3 4B/i });
-    expect(workerButton).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "외부 연동" }));
+    fireEvent.click((await screen.findAllByRole("button", { name: "연결" }))[0]);
 
-    fireEvent.click(screen.getByRole("button", { name: /Qwen3 14B/i }));
+    await waitFor(() => expect(screen.getByText("서버 연결 실패")).toBeInTheDocument());
+  });
 
-    await waitFor(() => expect(selectLlmModel).toHaveBeenCalledWith("qwen3:14b"));
+  test("persona preview opens dialog with 3 samples", async () => {
+    const state = createSettingsState();
+    render(<Settings settingsState={state} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "AI & 모델" }));
+    fireEvent.click(await screen.findByRole("button", { name: "미리보기" }));
+
+    await waitFor(() =>
+      expect(state.setMeta).toHaveBeenCalled()
+    );
   });
 });

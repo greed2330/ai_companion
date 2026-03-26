@@ -21,8 +21,8 @@ def use_tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", db_file)
     import backend.models.schema as schema_mod
     monkeypatch.setattr(schema_mod, "DB_PATH", db_file)
-    import backend.routers.chat as chat_mod
-    monkeypatch.setattr(chat_mod, "DB_PATH", db_file)
+    import backend.services.chat_pipeline as cp_mod
+    monkeypatch.setattr(cp_mod, "DB_PATH", db_file)
     import backend.routers.memory as mem_mod
     monkeypatch.setattr(mem_mod, "DB_PATH", db_file)
     import backend.services.memory as svc_mod
@@ -208,21 +208,24 @@ async def test_memory_confidence_no_decay_recent(use_tmp_db):
 
 @pytest.mark.asyncio
 async def test_chat_injects_memory(client, mock_mem0):
-    """/chat 요청 시 검색된 기억이 stream_chat의 memory_context에 주입된다."""
-    import backend.routers.chat as chat_mod
-    import backend.services.memory as svc_mod
+    """/chat 요청 시 검색된 기억이 system_prompt에 주입된다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    injected_context = None
+    injected_prompt = None
 
-    async def fake_stream(messages, memory_context=None):
-        nonlocal injected_context
-        injected_context = memory_context
+    async def fake_stream(messages, system_prompt, use_think):
+        nonlocal injected_prompt
+        injected_prompt = system_prompt
         yield "응답"
 
-    # search_memory가 사실을 반환하도록 설정
-    with patch("backend.routers.chat.search_memory", new_callable=AsyncMock) as mock_search, \
-         patch("backend.routers.chat.update_confidence", new_callable=AsyncMock), \
-         patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+
+    with patch("backend.services.chat_pipeline.search_memory", new_callable=AsyncMock) as mock_search, \
+         patch("backend.services.chat_pipeline.update_confidence", new_callable=AsyncMock), \
+         patch.object(cp_mod, "llm_router", mock_router):
         mock_search.return_value = [
             {"id": "f1", "fact": "오너는 Python 개발자야", "confidence": 0.9}
         ]
@@ -230,34 +233,41 @@ async def test_chat_injects_memory(client, mock_mem0):
         resp = await client.post("/chat", json={"message": "안녕"})
 
     assert resp.status_code == 200
-    assert injected_context is not None
-    assert "Python 개발자야" in injected_context
+    assert injected_prompt is not None
+    assert "Python 개발자야" in injected_prompt
 
 
 # ---------------------------------------------------------------------------
-# test_chat_no_memory_context_when_empty: 기억 없으면 context는 None
+# test_chat_no_memory_context_when_empty: 기억 없으면 system_prompt에 기억 섹션 없음
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_chat_no_memory_context_when_empty(client):
-    """/chat 요청 시 기억이 없으면 memory_context가 None으로 전달된다."""
-    import backend.services.memory as svc_mod
+    """/chat 요청 시 기억이 없으면 system_prompt에 기억 섹션이 없다."""
+    import backend.services.chat_pipeline as cp_mod
 
-    injected_context = "NOT_SET"
+    injected_prompt = "NOT_SET"
 
-    async def fake_stream(messages, memory_context=None):
-        nonlocal injected_context
-        injected_context = memory_context
+    async def fake_stream(messages, system_prompt, use_think):
+        nonlocal injected_prompt
+        injected_prompt = system_prompt
         yield "응답"
 
-    with patch("backend.routers.chat.search_memory", new_callable=AsyncMock) as mock_search, \
-         patch("backend.routers.chat.update_confidence", new_callable=AsyncMock), \
-         patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+
+    with patch("backend.services.chat_pipeline.search_memory", new_callable=AsyncMock) as mock_search, \
+         patch("backend.services.chat_pipeline.update_confidence", new_callable=AsyncMock), \
+         patch.object(cp_mod, "llm_router", mock_router):
         mock_search.return_value = []
 
         await client.post("/chat", json={"message": "안녕"})
 
-    assert injected_context is None
+    # system_prompt는 항상 빌드되지만, 기억 섹션("## 기억")은 없어야 함
+    assert injected_prompt != "NOT_SET"
+    assert "## 기억" not in (injected_prompt or "")
 
 
 # ---------------------------------------------------------------------------
@@ -268,15 +278,20 @@ async def test_chat_no_memory_context_when_empty(client):
 async def test_owner_response_delay_saved(use_tmp_db):
     """두 번째 /chat 요청 시 owner_response_delay_ms가 user 메시지에 저장된다."""
     import aiosqlite
+    import backend.services.chat_pipeline as cp_mod
     from backend.models.schema import DB_PATH
-    import backend.services.memory as svc_mod
 
-    async def fake_stream(messages, memory_context=None):
+    async def fake_stream(messages, system_prompt, use_think):
         yield "응답"
 
-    with patch("backend.routers.chat.search_memory", new_callable=AsyncMock) as mock_search, \
-         patch("backend.routers.chat.update_confidence", new_callable=AsyncMock), \
-         patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+
+    with patch("backend.services.chat_pipeline.search_memory", new_callable=AsyncMock) as mock_search, \
+         patch("backend.services.chat_pipeline.update_confidence", new_callable=AsyncMock), \
+         patch.object(cp_mod, "llm_router", mock_router):
         mock_search.return_value = []
 
         from backend.main import app

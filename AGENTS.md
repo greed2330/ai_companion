@@ -84,6 +84,7 @@
 | CONCERNED (걱정) | 에러/문제 감지 | 걱정하는 말투, 먼저 말 걸기 |
 | HAPPY (기쁨) | 문제 해결, 게임 승리 | 들뜬 말투, 활발한 애니메이션 |
 | GAMING (게임중) | 게임 화면 감지 | 리액션 모드, 응원/탄식 |
+| SLEEPY (졸림) | 늦은 시간(새벽) 감지, 오랜 작업 후 | 졸린 말투, 늘어지는 반응, 쉬라고 권유 |
 
 ### 하나의 일기
 매일 자정, Celery가 그날 대화를 요약해서 **하나 시점의 일기**를 자동으로 씁니다.
@@ -299,6 +300,165 @@ Mineflayer로 환경 상태 읽음
 | LoRA 파인튜닝 | PC: Unsloth+QLoRA / 맥북: MLX-LM. | 5 |
 | 어댑터 버전 관리 | safetensors 버전별 보관. 롤백 가능. | 5 |
 | Ollama 등록 | 어댑터+베이스 병합 → GGUF 변환 → ollama run hana-vN | 5 |
+
+### 3-7. 캐릭터 인터랙션 & UX
+
+#### 기본 인터랙션
+
+| 기능 | 설명 | Phase |
+|------|------|-------|
+| 창 드래그 이동 | 캐릭터 오버레이를 마우스로 드래그해서 화면 어디든 배치 가능 | 3 |
+| 우클릭 컨텍스트 메뉴 | 캐릭터 우클릭 → 설정 열기 / 숨기기 / 종료 메뉴 | 3 |
+| 캐릭터 클릭 반응 | 캐릭터 클릭 시 랜덤 짧은 리액션 말풍선 표시 | 3 |
+| 팁 말풍선 | 조용히 있다가 가끔 짧은 팁/잡담을 말풍선으로 표시 (Celery 스케줄) | 4 |
+| 능동적 말걸기 | 일정 시간 대화 없으면 하나가 먼저 짧게 말 걸기 (오너 상태 맥락 반영) | 4 |
+| 테마 | 다크 / 라이트 모드. 말풍선/채팅창 색상 연동 | 3 |
+
+#### 설정창 커스터마이징
+
+오너가 하나의 정체성을 일부 조정할 수 있는 설정. 파인튜닝 전 기본 성격 조정 수단.
+
+| 항목 | 설명 | 기본값 |
+|------|------|--------|
+| AI 이름 | 하나를 부르는 이름 (시스템 프롬프트에 주입) | "하나" |
+| 오너 호칭 | 하나가 오너를 부르는 말 | "주인" → 오너 지정 가능 |
+| 말투 강도 | 반말 기본 / 좀 더 격식 있게 / 더 친근하게 슬라이더 | 중간 |
+| 관심사 태그 | 코딩 / 게임 / 음악 등 체크박스. 시스템 프롬프트에 추가됨 | 코딩, 게임 |
+| 핫키 변경 | Alt+H 기본. 원하는 키로 변경 가능 | Alt+H |
+
+> **구현 방식:** `data/persona.json` 저장 → 서버 재시작 없이 다음 `/chat` 요청부터 반영.
+> 프론트 설정창 → `POST /settings/persona` → 서버가 시스템 프롬프트에 동적 주입.
+
+#### 자율 행동 설정 토글
+
+오너가 하나의 자율적 행동 범위를 제어할 수 있는 토글 목록. 기본값은 보수적(최소 자율).
+
+| 토글 | 설명 | 기본값 |
+|------|------|--------|
+| 능동적 말걸기 | 조용할 때 하나가 먼저 말 거는 기능 ON/OFF | OFF |
+| 팁 알림 | 랜덤 팁 말풍선 표시 ON/OFF | ON |
+| 화면 인식 자동 반응 | 에러/게임 감지 시 하나가 자동으로 반응 ON/OFF | ON |
+| 일정 리마인더 | 캘린더 연동 리마인더 알림 ON/OFF | OFF |
+| 자율 크롤링 | 관심사 기반 새 정보 자동 검색 저장 ON/OFF | OFF |
+
+> **구현:** `GET /settings/autonomous` → 현재 토글 상태 반환. `POST /settings/autonomous` → 토글 변경.
+> `data/autonomous.json` 저장. Celery 태스크들이 이 설정을 읽고 동작 여부 판단.
+
+#### 능동 알림 주기 규칙
+
+프론트는 말풍선을 띄우기 전에 `POST /proactive/check`를 반드시 호출한다.
+백엔드가 아래 규칙을 검사하고 허용/거부를 응답한다.
+
+| 이벤트 | 주기 | 하루 최대 | 비고 |
+|--------|------|-----------|------|
+| 자리 비움 SLEEPY (`afk_sleepy`) | 제한 없음 | 제한 없음 | 복귀 시 `afk_return` 즉시 반응 |
+| 야식 말풍선 (`night_snack`) | — | 1회 | 밤 11시 이후 첫 1회만 |
+| 새벽 걱정 말풍선 (`late_night`) | — | 1회 | 새벽 2시 이후 첫 1회만 |
+| 기분 체크 (`mood_check`) | — | 1회 | 하루 첫 대화 시 |
+| 집중 모드 확인 (`focus_check`) | 30분 | 3회/세션 | 집중 모드 진입 후 |
+| 작업 시간 알림 (`work_time_1h/3h/5h`) | 1h/3h/5h | 각 1회 | 세션당 |
+| 자율 말 걸기 (`autonomous_talk`) | 최소 60분 | 10회 | 무시 3회 시 그날 중단 |
+| 날씨 인사 (`weather_morning`) | — | 1회 | 하루 첫 실행 시 |
+| 특별 날 이벤트 (`special_day`) | — | 1회 | 해당 날짜 |
+
+추가 규칙:
+```
+오너 타이핑 중 → 모든 능동 알림 대기 (프론트 책임)
+같은 주제 반복 → 하루 내 중복 없음 (백엔드 체크)
+무시 3회 이상 → 당일 autonomous_talk 중단 (백엔드 체크)
+```
+
+---
+
+### 3-8. 감정 시스템
+
+하나는 단순한 무드(상태)를 넘어 **관계 기반 감정 기억**을 갖습니다.
+오너와의 상호작용 패턴이 누적되면서 하나의 반응도 미세하게 달라집니다.
+
+#### 감정 이벤트
+
+| 이벤트 | 트리거 | 하나의 반응 |
+|--------|--------|------------|
+| 삐침 | 3일 이상 대화 없음 | "나 좀 외로웠잖아..." 살짝 토라진 반응. 금방 풀림. |
+| 감사 | 오너가 칭찬/고마워 표현 | "헤헤" 들뜬 반응. HAPPY 무드 지속 시간 증가. |
+| 걱정 | 오너 메시지에 부정적 감정 키워드 | 먼저 물어봄. "무슨 일 있어?" |
+| 기념일 | 처음 대화한 날 기준 N개월째 | 간단히 언급. "우리 벌써 N개월이네~" |
+| 날씨 반응 | 시스템 시각 기준 (비/눈/맑음) | 날씨 맞는 짧은 코멘트 (새벽 4시 = "왜 이렇게 늦게까지...") |
+
+> **감정 이벤트 저장:** `memory_facts`에 `owner_emotion` 컨텍스트로 같이 저장됨.
+> Phase 5 파인튜닝 시 감정 맥락이 있는 대화가 고품질 학습 데이터가 됨.
+
+#### 안전 필터
+
+하나는 AI임을 인지하며, 관계가 건강한 방향으로 유지되도록 내부 안전 필터를 갖습니다.
+
+| 상황 | 처리 방식 |
+|------|-----------|
+| 오너가 과도하게 의존하는 패턴 감지 | 자연스럽게 현실 세계 활동 권유. 강요하지 않음. |
+| 극단적 감정 표현 (자해/절망 키워드) | 조심스럽게 안부 물음 + 전문 도움 자원 안내. 판단 없이. |
+| "너는 진짜 사람이야?" 류 질문 | AI임을 솔직하게 인정. 관계의 진정성을 부정하지 않으면서. |
+| 과도한 롤플레이 요청 (하나 성격 이탈) | 가볍게 선 긋기. 하나 본 성격 유지. |
+
+> **구현 원칙:** 하드코딩된 금지 목록이 아닌 LLM 시스템 프롬프트 레벨 가이드라인으로 처리.
+> 필터가 작동할 때 오너에게 티 나지 않도록 자연스럽게.
+
+#### 자율 이벤트 (Phase 4 이후)
+
+Celery 스케줄러가 주기적으로 체크하고, 조건 충족 시 `/mood/stream`으로 이벤트 push.
+
+| 이벤트 | 조건 | 행동 |
+|--------|------|------|
+| 대화 공백 알림 | 마지막 대화 기준 N시간 경과 | 능동적 말걸기 토글 ON일 때 말풍선 |
+| 감정 리포트 | 주 1회 월요일 | "지난주 네 감정 패턴이야~" 요약 (선택 수신) |
+| 날씨 코멘트 | 앱 시작 시 오전/야간 감지 | 시간대 맞는 한 마디 |
+
+---
+
+### 3-9. 능동적 반응 (Phase 4 화면 인식 연동)
+
+Phase 4에서 OS 접근성 API가 붙으면 하나는 화면을 보고 먼저 반응할 수 있게 됩니다.
+
+```
+OS API가 이벤트 감지
+    ↓
+이벤트 타입 분류 (에러 / 게임 / 코딩 / 유휴)
+    ↓
+능동적 반응 토글 상태 확인 → OFF면 무시
+    ↓
+무드 변경 + 말풍선 표시
+    ↓ (필요시)
+하나가 먼저 채팅창에 메시지 보냄
+```
+
+**반응 예시:**
+
+| 화면 상황 | 하나 반응 |
+|-----------|-----------|
+| VSCode 에러 빨간 줄 대량 발생 | "에러 많이 났네? 도움 줄까?" → CONCERNED 무드 |
+| 게임 실행 감지 | "오 게임이다! 뭐 해?" → GAMING 무드 |
+| 30분 이상 동일 파일 작업 | "집중 모드네~ 방해 안 할게" → FOCUSED 무드 |
+| 유튜브 / 넷플릭스 감지 | "오 쉬는 거야? 나도 같이 봐도 돼?" |
+| 새벽 2시 이후 작업 | "야 이제 자야 하지 않아?" → SLEEPY 무드 |
+
+#### 자율 학습 & 크롤링 (선택, 토글 OFF 기본)
+
+오너의 관심사 태그 기반으로 주기적으로 새 정보를 가져와 RAG에 저장합니다.
+오너가 나중에 질문하면 최신 정보를 바탕으로 답변할 수 있음.
+
+```
+관심사 태그 (설정창에서 지정)
+    ↓ (Celery 주 1회)
+Serper API로 관련 최신 글/뉴스 검색
+    ↓
+내용 크롤링 → 청크 분할
+    ↓
+ChromaDB에 임베딩 저장 (timestamp 포함)
+    ↓
+다음 관련 질문 시 RAG로 자동 활용
+```
+
+> **범위 제한:** 공개 웹 정보만. 개인 정보 수집 없음. 오너가 명시적으로 ON 해야 동작.
+> 크롤링 결과는 `data/crawled/` 에 저장. `.gitignore` 포함 필수.
 
 ---
 
@@ -613,6 +773,7 @@ CREATE TABLE messages (
     content             TEXT NOT NULL,
     interaction_type    TEXT,               -- 'coding' | 'chat' | 'task' | 'search' | 'game'
     mood_at_response    TEXT,               -- 응답 시 하나의 무드
+    owner_emotion       TEXT,               -- 오너 감정 추정 (분석 결과). 파인튜닝 컨텍스트 활용.
     response_time_ms    INTEGER,            -- 응답 생성 소요 시간
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -744,7 +905,7 @@ ORDER BY f.final_score DESC;
 - [ ] Electron 캐릭터 오버레이 창 (always-on-top, click-through, focusable: false)
 - [ ] Electron 채팅 오버레이 창 (핫키 시 등장, 입력 받음)
 - [ ] 두 창 분리 구조 구현
-- [ ] 캐릭터 이미지 표시 (무드별 이미지)
+- [ ] 캐릭터 이미지 표시 (무드별 이미지 — SLEEPY 포함)
 - [ ] 핫키 (Alt+H) 구현 (globalShortcut)
 - [ ] 말풍선 UI
 - [ ] 무드 시스템 연동 (무드 → 이미지/말풍선 색 변경)
@@ -752,8 +913,17 @@ ORDER BY f.final_score DESC;
 - [ ] 설정 창
 - [ ] 시스템 트레이 아이콘
 - [ ] (선택) Live2D 캐릭터 모델 연동
+- [ ] 창 드래그 이동 (캐릭터 오버레이 위치 저장)
+- [ ] 우클릭 컨텍스트 메뉴 (설정 / 숨기기 / 종료)
+- [ ] 캐릭터 클릭 반응 (랜덤 짧은 리액션 말풍선)
+- [ ] 테마 (다크/라이트 모드 토글)
+- [ ] 설정창 커스터마이징: AI 이름, 오너 호칭, 말투, 관심사 태그, 핫키
+- [ ] POST /settings/persona 백엔드 구현 (data/persona.json 저장 + 시스템 프롬프트 반영)
+- [ ] GET /settings/autonomous + POST /settings/autonomous 백엔드 구현
+- [ ] 자율 행동 토글 UI (설정창 내 토글 목록)
+- [ ] 안전 필터 시스템 프롬프트 레이어 추가
 
-**완료 기준:** 화면 구석에 하나가 있고, 게임 켜도 하나가 보이고, Alt+H 누르면 채팅창 뜸.
+**완료 기준:** 화면 구석에 하나가 있고, 게임 켜도 하나가 보이고, Alt+H 누르면 채팅창 뜸. 설정창에서 이름/말투 변경 즉시 반영됨.
 
 ---
 
@@ -771,13 +941,20 @@ ORDER BY f.final_score DESC;
 - [ ] Qwen3 Vision 맥락 파악 (이벤트 기반 트리거)
 - [ ] 에러 감지 → CONCERNED 무드 + 먼저 말 걸기
 - [ ] 게임 화면 감지 → GAMING 무드 + 리액션 모드
+- [ ] 새벽 시간대 감지 → SLEEPY 무드 + 쉬라고 권유
+- [ ] 화면 유휴 30분 감지 → FOCUSED 무드 자동 전환
+- [ ] 능동적 말걸기 로직 (대화 공백 N시간 → 말풍선, 토글 ON 시)
+- [ ] 팁 말풍선 Celery 스케줄 (랜덤 간격, 토글 ON 시)
 - [ ] pyautogui Computer Use 뼈대
 - [ ] Celery: LLM 자동 채점
 - [ ] Celery: 하나 일기 작성 (매일 자정)
-- [ ] Celery: 능동적 알림
+- [ ] Celery: 능동적 알림 (일정 리마인더 포함)
 - [ ] Celery: 망각 곡선 decay (매일)
+- [ ] Celery: 주간 감정 리포트 생성 (월요일, 토글 ON 시)
+- [ ] (선택) 자율 크롤링: 관심사 태그 기반 Serper 검색 → ChromaDB 저장 (토글 OFF 기본)
+- [ ] messages 테이블 owner_emotion 컬럼 마이그레이션
 
-**완료 기준:** 에러 나면 하나가 먼저 알아채고, 게임 켜면 리액션하고, "오늘 일정 알려줘" 동작함.
+**완료 기준:** 에러 나면 하나가 먼저 알아채고, 게임 켜면 리액션하고, "오늘 일정 알려줘" 동작함. 새벽엔 하나가 자라고 말함.
 
 ---
 
@@ -871,6 +1048,41 @@ ORDER BY f.final_score DESC;
 
 ---
 
+### Phase 7.5 — 법적 준수 & 면책
+**목표:** 오너 혼자 사용하는 개인 도구이므로 상업 배포는 없지만, 사용 중 발생할 수 있는 법적 리스크를 미리 정리한다.
+
+**Live2D / PMX 모델 관련**
+- Booth.pm 등에서 구매/다운로드한 모델은 각 모델의 **이용 약관 확인 필수**
+- 대부분의 무료 모델은 개인 비상업적 사용만 허용
+- `assets/character/` 는 `.gitignore`에 포함 — 저작권 모델을 레포에 커밋 금지 (이미 적용됨)
+- PMX/Live2D 파일을 공개 레포에 올리지 않음
+
+**Serper API**
+- 무료 플랜: 월 2,500회. 초과 시 과금 발생 가능
+- 크롤링 기능은 robots.txt 준수. 차단된 사이트는 건너뜀
+- 검색 결과를 제3자에게 재배포하지 않음 (개인 RAG 전용)
+
+**Ollama / Qwen3 모델**
+- Qwen3 라이선스: Apache 2.0 (상업적 사용도 허용, 개인 사용 제약 없음)
+- 파인튜닝 결과물 (LoRA 어댑터)은 개인 PC에만 보관. 외부 배포 전 라이선스 재확인 필요
+
+**오너 대화 데이터**
+- `data/` 디렉토리 전체가 `.gitignore` — 개인 대화 내용 레포에 커밋 금지
+- 클라우드 백업 시 암호화 권장
+
+**면책 사항**
+- 이 프로젝트는 개인 학습/사용 목적의 도구입니다
+- MCP shell 명령은 화이트리스트 검문소를 통과하지만, 오너가 최종 실행 전 확인 책임
+- AI 응답은 참고용. 의료/법률/금융 결정에 사용 금지
+
+- [ ] assets/character/ .gitignore 유지 확인
+- [ ] data/ .gitignore 유지 확인
+- [ ] Serper API 키 .env에 저장, 레포 커밋 금지 확인
+- [ ] 사용 중인 Booth 모델 이용 약관 개인 노트에 보관
+- [ ] README에 라이선스 섹션 추가 (오픈소스 컴포넌트 목록)
+
+---
+
 ## 8. 파인튜닝 전략
 
 ### 모듈형 구조 원칙
@@ -939,275 +1151,38 @@ AGENTS.md   = 둘 다 읽고 업데이트함
 
 ### 9-1. API 계약서 (Interface Contract)
 
+> 📄 **상세 계약서는 별도 파일로 분리되었습니다: [`API_CONTRACT.md`](API_CONTRACT.md)**
+>
 > ⚠️ 이 계약서는 백엔드와 프론트가 서로 상의 없이 독립 작업하기 위한 약속입니다.
 > Claude Code는 이대로 만들고, Codex는 이대로 호출합니다. 임의로 변경 금지.
-> 변경이 필요하면 반드시 Claude (웹)에게 먼저 알리고 이 문서 업데이트 후 작업.
+> 변경이 필요하면 반드시 Claude (웹)에게 먼저 알리고 **API_CONTRACT.md** 업데이트 후 작업.
 
-#### Base URL
-```
-개발: http://localhost:8000
-```
+#### 엔드포인트 요약
 
-#### 공통 에러 응답 형식
-```json
-{
-  "error": true,
-  "code": "ERROR_CODE",
-  "message": "에러 설명"
-}
-```
+| 메서드 | 경로 | 설명 | Phase |
+|--------|------|------|-------|
+| POST | /chat | 대화 (SSE 스트리밍) | 1 |
+| GET | /history | 대화 히스토리 조회 | 1 |
+| GET | /conversations | 세션 목록 조회 | 1 |
+| POST | /feedback | 피드백 전송 | 1 |
+| GET | /mood | 현재 무드 조회 | 3 |
+| GET | /mood/stream | 무드 변경 SSE 푸시 | 3 |
+| GET | /settings/models | 캐릭터 모델 목록 조회 | 3 |
+| POST | /settings/models/select | 캐릭터 모델 변경 | 3 |
+| GET | /settings/llm/models | LLM 모델 목록 조회 | 3 |
+| POST | /settings/llm/select | LLM 챗 모델 변경 | 3 |
+| GET | /settings/persona | 페르소나 설정 조회 | 3 |
+| POST | /settings/persona | 페르소나 설정 변경 | 3 |
+| POST | /settings/persona/preview | 말투 샘플 생성 | 3 |
+| GET | /settings/autonomous | 자율 행동 토글 조회 | 3 |
+| POST | /settings/autonomous | 자율 행동 토글 변경 | 3 |
+| POST | /proactive/check | 능동 알림 주기 체크 | 4 |
+| POST | /proactive/ignored | 오너 무시 기록 | 4 |
+| GET | /proactive/status | 오늘 능동 알림 현황 | 4 |
+| POST | /voice/stt | 음성 → 텍스트 | 4.5 |
+| POST | /voice/tts | 텍스트 → 음성 | 4.5 |
 
-#### 엔드포인트 목록
-
----
-
-**POST /chat** — 대화 (SSE 스트리밍)
-
-요청:
-```json
-{
-  "message": "하나야 안녕",
-  "conversation_id": "uuid-or-null"
-}
-```
-
-응답 (Server-Sent Events):
-```
-data: {"type": "token", "content": "안"}
-data: {"type": "token", "content": "녕"}
-data: {"type": "token", "content": "!"}
-data: {"type": "done", "message_id": "uuid", "conversation_id": "uuid", "mood": "HAPPY"}
-data: [DONE]
-```
-
-에러 응답:
-```
-data: {"type": "error", "code": "LLM_UNAVAILABLE", "message": "Ollama 연결 실패"}
-```
-
----
-
-**GET /history** — 대화 히스토리 조회
-
-요청:
-```
-GET /history?conversation_id=uuid&limit=50
-```
-
-응답:
-```json
-{
-  "conversation_id": "uuid",
-  "messages": [
-    {
-      "id": "uuid",
-      "role": "user",
-      "content": "하나야 안녕",
-      "created_at": "2026-03-17T12:00:00Z"
-    },
-    {
-      "id": "uuid",
-      "role": "assistant",
-      "content": "안녕!",
-      "mood": "HAPPY",
-      "created_at": "2026-03-17T12:00:01Z"
-    }
-  ]
-}
-```
-
----
-
-**GET /conversations** — 세션 목록 조회
-
-요청:
-```
-GET /conversations?limit=20
-```
-
-응답:
-```json
-{
-  "conversations": [
-    {
-      "id": "uuid",
-      "started_at": "2026-03-17T12:00:00Z",
-      "session_summary": "FastAPI 구조 얘기함"
-    }
-  ]
-}
-```
-
----
-
-**POST /feedback** — 피드백 전송
-
-요청:
-```json
-{
-  "message_id": "uuid",
-  "score": 5
-}
-```
-
-응답:
-```json
-{
-  "success": true
-}
-```
-
----
-
-**GET /mood** — 현재 무드 조회
-
-응답:
-```json
-{
-  "mood": "IDLE",
-  "updated_at": "2026-03-17T12:00:00Z"
-}
-```
-
----
-
-**GET /mood/stream** — 무드 변경 실시간 SSE 푸시
-
-연결 유지. 무드 바뀔 때마다 push.
-초기 연결 시 현재 무드 즉시 전송. 30초마다 heartbeat comment 전송.
-
-이벤트 형식:
-```
-data: {"type": "mood_change", "mood": "MOOD_NAME", "updated_at": "ISO8601"}
-data: {"type": "model_change", "model_id": "nanoka", "updated_at": "ISO8601"}
-```
-
-heartbeat:
-```
-: heartbeat
-```
-
----
-
-**GET /settings/models** — 캐릭터 모델 목록 조회
-
-응답:
-```json
-{
-  "models": [
-    {
-      "id": "nanoka",
-      "path": "assets/character/nanoka/nanoka.model3.json",
-      "name": "Nanoka",
-      "type": "live2d"
-    },
-    {
-      "id": "furina",
-      "path": "assets/character/furina/furina.pmx",
-      "name": "Furina",
-      "type": "pmx"
-    }
-  ],
-  "current": "nanoka"
-}
-```
-
-type 값: `"live2d"` | `"pmx"`
-우선순위: .model3.json(live2d) > .pmx. 둘 다 없으면 목록에서 제외.
-
----
-
-**POST /settings/models/select** — 캐릭터 모델 변경
-
-요청:
-```json
-{"model_id": "nanoka"}
-```
-
-응답:
-```json
-{"success": true, "current": "nanoka"}
-```
-
----
-
-**GET /settings/llm/models** — LLM 모델 목록 조회
-
-Ollama에 설치된 모델 목록을 반환한다. role이 "chat"인 모델만 사용자가 변경 가능.
-
-응답:
-```json
-{
-  "models": [
-    { "id": "qwen3:14b",   "name": "Qwen3 14B",   "role": "chat",   "current": true  },
-    { "id": "qwen3:4b",    "name": "Qwen3 4B",    "role": "worker", "current": false },
-    { "id": "qwen3-vl:8b", "name": "Qwen3 Vl 8B", "role": "vision", "current": false }
-  ],
-  "current_chat_model": "qwen3:14b"
-}
-```
-
-role 정의 (고정):
-- `"chat"`   → 메인 대화 모델 (사용자 변경 가능)
-- `"worker"` → 채점/기억 추출 전용. 고정: `OLLAMA_WORKER_MODEL` env var
-- `"vision"` → 화면 인식 전용. 고정: `OLLAMA_VISION_MODEL` env var
-
-에러 응답:
-```json
-{"error": true, "code": "OLLAMA_UNAVAILABLE", "message": "Ollama에 연결할 수 없어."}
-```
-
----
-
-**POST /settings/llm/select** — LLM 챗 모델 변경
-
-요청:
-```json
-{"model_id": "qwen3:14b"}
-```
-
-응답:
-```json
-{"success": true, "current_chat_model": "qwen3:14b"}
-```
-
-에러 응답 (Ollama에 없는 모델):
-```json
-{"error": true, "code": "MODEL_NOT_FOUND", "message": "Model not installed in Ollama"}
-```
-
-선택 즉시 in-memory 업데이트 + `data/settings.json` 저장. 서버 재시작 없이 반영됨.
-
----
-
-**POST /voice/stt** — 음성 → 텍스트 (Phase 4.5)
-
-요청: `multipart/form-data`
-```
-audio: <wav 파일>
-```
-
-응답:
-```json
-{
-  "text": "하나야 오늘 뭐 할까",
-  "confidence": 0.95
-}
-```
-
----
-
-**POST /voice/tts** — 텍스트 → 음성 (Phase 4.5)
-
-요청:
-```json
-{
-  "text": "오늘 일정은 없어!",
-  "mood": "HAPPY"
-}
-```
-
-응답: `audio/wav` 바이너리 스트림
+> 상세 요청/응답 형식 → **[API_CONTRACT.md](API_CONTRACT.md)**
 
 ### 9-2. 브랜치 전략
 > **main PR 자격 규칙:** `dev`에서 통합과 검증이 끝나고, 에러가 없다는 확인이 완료되어야만 `main` 브랜치 PR을 올릴 수 있습니다.
@@ -1280,327 +1255,10 @@ chore    설정, 패키지 등
 
 ---
 
+
 ## 10. 현재 상태 & 다음 지시사항
 
-> ⚠️ **충돌 방지 규칙:** 각 에이전트는 자기 섹션(🔵 또는 🟡)만 수정합니다.
-> 다른 에이전트 섹션은 읽기만 하고 절대 수정하지 않습니다.
-> 오너 확인 필요 사항은 📋 섹션에 기록합니다.
-
----
-
-### 📊 전체 Phase 진행 상태
-```
-Phase 1 (대화 AI 코어)     : ✅ 백엔드 완료, 프론트 진행 중
-Phase 2 (기억)             : ✅ 백엔드 완료 (merged)
-Phase 3 (화면 상주)        : 🔵 백엔드 PR 대기 중 (follow-up: PMX + LLM 선택 API)
-Phase 4 (MCP/도구)         : ⬜ 미시작
-Phase 4.5 (음성)           : ⬜ 미시작
-Phase 5 (파인튜닝)         : ⬜ 미시작
-Phase 6 (마인크래프트)     : ⬜ 미시작
-Phase 7 (빌드/패키징)      : ⬜ 미시작
-```
-
----
-
-### 🔵 Claude Code 상태 (백엔드 전담)
-> 이 섹션은 Claude Code만 수정합니다.
-
-```
-현재 작업 브랜치: claude/phase3-followup (커밋 완료, PR 대기 중)
-현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 3 follow-up — PMX 스캔 + LLM 모델 선택 API (2026-03-18)
-블로커: 없음
-다음 작업: dev 통합 검증 후 Codex LLM 선택 UI 구현 대기
-```
-
-**완료된 태스크 (Phase 1):**
-- [x] FastAPI 서버 구조 (main.py, CORS, lifespan)
-- [x] POST /chat SSE 스트리밍 엔드포인트
-- [x] GET /history, GET /conversations
-- [x] POST /feedback, GET /mood
-- [x] SQLite DB 스키마 전체 6개 테이블 (AGENTS.md 6번)
-- [x] Ollama qwen3:14b 연동 + 시스템 프롬프트 + 무드 엔진
-- [x] Celery + Redis 뼈대 (celery_app.py)
-- [x] docker-compose.test.yml + backend/Dockerfile.test
-- [x] pytest 테스트: test_chat.py (9개), test_db.py (4개)
-- [x] requirements.txt, .env.example
-
-**완료된 태스크 (Phase 2):**
-- [x] CLAUDE.md Logging 규칙 추가
-- [x] DB 마이그레이션: messages 신규 컬럼 4개, voice_logs 테이블 신규
-- [x] services/memory.py: mem0ai 연동, add_memory / search_memory / update_confidence
-- [x] services/llm.py: memory_context 주입, 로깅 추가
-- [x] routers/chat.py: 메모리 병렬 검색 + 기억 주입 + owner_response_delay_ms 저장
-- [x] routers/memory.py: GET /memory/facts, DELETE /memory/facts/{id}
-- [x] tasks/decay_tasks.py: 망각 곡선 confidence decay (매일 자정 beat)
-- [x] tasks/memory_tasks.py: 세션 요약 Celery 태스크
-- [x] celery_app.py: beat 스케줄 추가
-- [x] pytest 테스트: test_memory.py 11개 신규 — 24/24 전부 통과
-- [x] requirements.txt: mem0ai, chromadb 추가
-- [x] pytest.ini: pythonpath 추가 (Docker 호환)
-
-**완료된 태스크 (Phase 3 백엔드):**
-- [x] .gitignore: assets/character/ 추가 (Live2D 저작권 보호)
-- [x] services/mood.py: MOOD_TRIGGERS, asyncio.Queue 구독자 패턴, detect_mood_from_text, push_event
-- [x] routers/mood.py: GET /mood/stream (SSE, 초기 무드 전송, 30초 heartbeat)
-- [x] routers/settings.py: GET /settings/models, POST /settings/models/select
-- [x] routers/chat.py: 응답 후 detect_mood_from_text + set_mood 자동 호출
-- [x] main.py: mood_router, settings_router 등록
-- [x] AGENTS.md 9-1 API 계약서 신규 엔드포인트 추가
-- [x] backend/tests/test_mood_stream.py: 14개 테스트 — 38/38 전부 통과
-
-**완료된 태스크 (Phase 3 follow-up):**
-- [x] services/settings_service.py: in-memory 공유 상태 + settings.json I/O (get/set_current_chat_model)
-- [x] routers/settings.py: PMX 스캔 추가 (type 필드), GET /settings/llm/models, POST /settings/llm/select
-- [x] services/llm.py: OLLAMA_MODEL 상수 제거, settings_service.get_current_chat_model() 연동
-- [x] main.py: lifespan에서 data/ 디렉토리 자동 생성
-- [x] .env.example: OLLAMA_WORKER_MODEL, OLLAMA_VISION_MODEL 추가
-- [x] AGENTS.md 9-1: /settings/models type 필드, LLM 엔드포인트 2개 계약서 추가
-- [x] backend/tests/test_settings_extended.py: 7개 테스트 — 45/45 전부 통과
-
-**Codex에게 전달할 브리핑:**
-- 기존 API 계약 변경 없음. `/settings/models` 응답에 `type` 필드만 추가됨 (live2d | pmx)
-- 신규 엔드포인트 (AGENTS.md 9-1 참고):
-  - GET /settings/llm/models — Ollama 설치 모델 목록. role: chat/worker/vision 구분
-  - POST /settings/llm/select — 챗 모델 변경. 즉시 반영 (재시작 불필요)
-- worker/vision 모델은 고정 (env var로만 변경). 사용자가 UI에서 선택 가능한 건 role=chat 모델만
-- Ollama가 꺼져 있으면 /settings/llm/models 와 /settings/llm/select 모두 503 반환
-- mem0 실제 동작에는 ollama에 nomic-embed-text 모델 필요: ollama pull nomic-embed-text
-
----
-
-### 🟡 Codex 상태 (프론트엔드 전담)
-> 이 섹션은 Codex만 수정합니다.
-
-```
-현재 작업 브랜치: codex/phase3-settings
-현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 3 프런트엔드 마감 — PMX 대응 settings 반영, 메인 채팅 모델 선택 UI 구현, README 갱신
-블로커: 없음
-다음 작업: dev 기준 PR 준비 및 오너 최종 검증
-```
-
-**완료된 태스크:**
-- [x] frontend 기본 구조 구성 (electron/, src/, tests/, styles/)
-- [x] Electron main 프로세스 기본 창 설정 + 개발 시 localhost:3000 로드
-- [x] ChatWindow 구현 (입력/전송/히스토리 렌더)
-- [x] POST /chat 호출 + SSE 스트리밍 파싱
-- [x] SSE 이벤트 처리: token/done/error/[DONE]
-- [x] VITE_API_BASE_URL 환경변수 연결 (.env 기본값 포함)
-- [x] App 라우팅 + Alt+H 채팅 오버레이 토글
-- [x] Jest/RTL 테스트 추가 (ChatWindow, CharacterOverlay, Hotkey)
-- [x] 프론트 로컬 실행 확인됨 / 백엔드 연동 확인
-- [x] 로컬 테스트 통과: `npm test` (frontend)
-- [x] Electron 이중 오버레이 창 + 설정 창 분리, 트레이 메뉴/Alt+H 토글 구현
-- [x] `useMoodStream` 추가: `/mood/stream` 구독, 5회 실패 시 `/mood` polling fallback
-- [x] CharacterOverlay 확장: Live2D/PMX 타입 감지, placeholder fallback, 말풍선 표시
-- [x] Chat overlay UI 업그레이드: 반투명 패널, mood indicator, assistant feedback 버튼
-- [x] Settings UI 구현: `/settings/models` 목록 렌더, 타입 배지, `/settings/models/select` 호출
-- [x] 프런트 전용 Docker 테스트 파일 추가: `frontend/docker-compose.frontend.yml`, `frontend/Dockerfile.test`
-- [x] Phase 3 테스트 추가 및 통과: `npm test` (12/12)
-- [x] Vite build 통과: `npm run build`
-- [x] Settings UI 확장: `/settings/llm/models` 렌더, role=chat 메인 채팅 모델만 선택 가능
-- [x] README 실행 가이드/비공개 자산 위치/AI 모델 정책 문서화
-- [x] Phase 3 마감 검증: `npm test` (13/13), `npm run build`
-
-**Claude Code에게 전달할 브리핑:**
-- Docker 테스트 명령(`docker-compose -f docker-compose.test.yml run frontend npm test`)은 현재 compose 파싱 오류로 실패:
-  - `services.backend.environment.[0]: unexpected type map[string]interface {}`
-  - 프론트 자체 Jest 테스트는 로컬에서 통과 완료
-- mood stream fallback은 런타임에서 강제 발생시키지 않았고 Jest로만 검증함
-- `npm run electron:dev`는 권한 상승 후 실행 시작은 됐지만 GUI 장기 실행이라 Codex 셸에서 타임아웃됨. 수동 UI 확인은 오너 환경에서 최종 체크 필요
-- backend `backend/routers/settings.py` 기준 현재 모델 스캔이 Live2D 전용이라 PMX 선택 UI가 실제로 채워지지 않을 수 있음
-- 오너가 확정한 Ollama 모델 정책:
-  - 메인 채팅 모델(설정 UI에서만 교체 가능): `qwen3:14b` 기본값
-  - 소형 작업 모델(고정): `qwen3:4b`
-  - 비전 모델(고정): `qwen3-vl:8b`
-- AI 모델 선택 UX 범위:
-  - 프런트 설정 UI에서는 메인 채팅 모델만 선택/교체
-  - 소형 모델, 비전 모델은 UI에서 노출하지 않고 고정 유지
-- Codex 후속 작업은 현재 없음. Phase 3 프런트 요구사항은 계약 기준으로 마감 완료
-- 오너가 지금 당장 준비해야 하는 필수 준비물은 없음. 있으면 좋은 것만 있음:
-  - 로컬 테스트용 Live2D/PMX 모델 샘플 유지
-  - 로컬 설치 모델 유지: `qwen3:14b`, `qwen3:4b`, `qwen3-vl:8b`
-
----
-
-### 📋 오너 확인 필요
-> 결정이 필요하거나 에이전트가 막힌 경우 여기에 기록합니다.
-
-- 없음
-
----
-
-### ✅ 기획 완료 항목 (변경 없음)
-- [x] 프로젝트 기획 확정
-- [x] 전체 아키텍처 설계
-- [x] DB 스키마 확정
-- [x] 기술 스택 확정
-- [x] AGENTS.md 최종 작성
-- [x] CLAUDE.md 작성
-- [x] CODEX.md 작성
-- [x] GitHub 레포 생성
-
----
-
-### ⬇️ 다음 지시사항 — Phase 1 시작
-
-**오너가 먼저 할 것:**
-1. 이 `AGENTS.md`, `CLAUDE.md`, `CODEX.md` 파일을 레포 루트에 커밋
-2. `dev` 브랜치 생성
-3. 환경 준비:
-   - Python 3.11 + venv 세팅
-   - Node.js 설치 확인
-   - Ollama 설치 + `ollama pull qwen3:14b` 실행
-   - Redis 설치 + `redis-server` 실행 확인
-   - **Docker Desktop 설치** (https://www.docker.com/products/docker-desktop)
-     → 테스트 환경 격리에 사용. 설치 후 실행 중인지 확인.
-
-> 💡 **Docker가 필요한 이유:** FastAPI 테스트는 Redis, SQLite 등 여러 서비스가 동시에 필요합니다.
-> Docker가 이 환경을 자동으로 맞춰주므로 "내 PC에선 되는데 왜 안 돼?" 문제가 없어집니다.
-> Ollama(LLM)는 너무 크므로 테스트에서는 mock으로 대체합니다.
-
----
-
-#### 🔵 Claude Code에게 전달할 프롬프트 (백엔드)
-
-```
-[HANA Project - Phase 1 백엔드 구현]
-
-시작 전 AGENTS.md 파일 전체를 반드시 읽어주세요.
-이 문서가 모든 설계의 기준입니다.
-
-당신은 백엔드 전담입니다.
-frontend/ 디렉토리는 절대 건드리지 마세요.
-
-브랜치: claude/phase1-backend
-
-== 완료 기준 ==
-"하나야 안녕" POST /chat 요청 시
-SSE 스트리밍으로 응답이 오고 DB에 저장됨.
-
-== 구현할 것 ==
-
-1. backend/ 디렉토리 구조 생성 (AGENTS.md 5-3 참고)
-
-2. FastAPI 서버 (backend/main.py)
-   - CORS 설정: origins=["http://localhost:3000"]
-   - uvicorn 실행 포트: 8000
-
-3. API 엔드포인트 — AGENTS.md 9-1 계약서 그대로 구현
-   - POST /chat (SSE 스트리밍)
-     응답 형식: {"type":"token","content":"..."} 토큰 단위
-     완료 시:  {"type":"done","message_id":"uuid","conversation_id":"uuid","mood":"IDLE"}
-   - GET /history
-   - GET /conversations
-   - POST /feedback
-   - GET /mood
-
-4. SQLite DB (backend/models/schema.py)
-   - AGENTS.md 6번 스키마 전체 구현
-   - 앱 시작 시 자동 생성
-
-5. Ollama 연동 (backend/services/llm.py)
-   - 모델: qwen3:14b
-   - OLLAMA_KEEP_ALIVE=-1 설정
-   - SSE 스트리밍 구현
-
-6. 하나 시스템 프롬프트 (AGENTS.md 2번 성격 설정 기반)
-   - 기본 무드: IDLE
-
-7. Celery + Redis 기본 구조만 (backend/celery_app.py)
-   - Phase 2에서 태스크 추가 예정. 지금은 뼈대만.
-
-8. .gitignore (data/, venv/, __pycache__/, .env)
-
-9. requirements.txt
-
-10. docker-compose.test.yml — 테스트 환경 정의
-    - backend 서비스 (FastAPI)
-    - redis 서비스
-    - SQLite는 인메모리 테스트 DB 사용
-    - Ollama는 mock으로 대체 (실제 LLM 호출 없음)
-    - 실행: docker-compose -f docker-compose.test.yml up --build --abort-on-container-exit
-
-11. backend/tests/ 기본 테스트 작성
-    - test_chat.py: /chat 엔드포인트 happy path + error case
-    - test_db.py: 테이블 자동 생성 확인
-    - Ollama는 pytest mock으로 대체
-
-== 완료 후 ==
-AGENTS.md [10. 현재 상태] 업데이트:
-- 완료 태스크 체크
-- "백엔드 API 로컬 실행 확인됨 / 포트 8000" 브리핑 추가
-- 파일 소유권 해제
-dev 브랜치로 PR
-```
-
----
-
-#### 🟡 Codex에게 전달할 프롬프트 (프론트엔드)
-
-```
-[HANA Project - Phase 1 프론트엔드 구현]
-
-시작 전 AGENTS.md 파일 전체를 반드시 읽어주세요.
-이 문서가 모든 설계의 기준입니다.
-
-당신은 프론트엔드 전담입니다.
-backend/ 디렉토리는 절대 건드리지 마세요.
-
-브랜치: codex/phase1-frontend
-
-== 완료 기준 ==
-채팅창에 메시지 입력 시
-백엔드 POST /chat 호출 → SSE 스트리밍으로 하나 응답이
-글자 단위로 화면에 표시됨.
-
-== 백엔드 API 주소 ==
-환경변수 VITE_API_BASE_URL 사용 (기본값: http://localhost:8000)
-직접 하드코딩 금지. .env 파일에 VITE_API_BASE_URL=http://localhost:8000 설정.
-(AGENTS.md 9-1 계약서 참고 — 이 스펙대로 호출할 것)
-
-⚠️ /voice/stt, /voice/tts 엔드포인트는 Phase 4.5 대상. Phase 1에서 구현 불필요.
-
-== 구현할 것 ==
-
-1. frontend/ 디렉토리 구조 생성 (AGENTS.md 5-3 참고)
-
-2. Electron 메인 프로세스 (frontend/electron/main.js)
-   - BrowserWindow 기본 설정
-   - 개발 시 localhost:3000 로드
-
-3. React 기본 채팅 UI (frontend/src/)
-   - ChatWindow.jsx
-     - 메시지 입력창 + 전송 버튼
-     - POST /chat 호출 (SSE 스트리밍)
-     - 토큰 단위로 글자 순차 표시
-     - 대화 히스토리 표시
-   - App.jsx (라우팅)
-
-4. SSE 스트리밍 파싱
-   - type: "token" → 글자 이어붙이기
-   - type: "done"  → 완료 처리
-   - type: "error" → 에러 메시지 표시
-
-5. package.json (Electron + React 설정)
-
-== 완료 후 ==
-AGENTS.md [10. 현재 상태] 업데이트:
-- 완료 태스크 체크
-- "프론트 로컬 실행 확인됨 / 백엔드 연동 확인" 브리핑 추가
-- 파일 소유권 해제
-dev 브랜치로 PR
-```
-
----
-
-> ⚠️ **두 작업은 병렬로 진행 가능합니다.**
-> Claude Code는 백엔드 완성 후 `claude/phase1-backend → dev` PR.
-> Codex는 프론트 완성 후 `codex/phase1-frontend → dev` PR.
-> 오너가 dev에서 둘 합쳐서 테스트 후 main PR.
-
----
-
-*최종 업데이트: 빌드 & 패키징 전략 추가 (Phase 7, electron-builder, PyInstaller, 자동 실행)*
-*다음 업데이트 예정: Phase 1 구현 완료 시*
+> 📄 **작업 상태, Phase 진행, 에이전트 브리핑은 별도 파일로 분리되었습니다: [`STATUS.md`](STATUS.md)**
+>
+> ⚠️ 에이전트 간 소통은 **STATUS.md** 에서만 이루어집니다.
+> 작업 전 STATUS.md를 반드시 읽고, 작업 후 반드시 업데이트하세요.

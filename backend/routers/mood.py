@@ -49,4 +49,11 @@ async def mood_stream() -> StreamingResponse:
             unsubscribe(q)
             logger.info("mood/stream: client disconnected")
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # nginx 버퍼링 비활성화 — SSE 드롭 방지
+        },
+    )

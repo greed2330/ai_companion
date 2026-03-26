@@ -1,209 +1,66 @@
 """
-대화 관련 라우터.
-POST /chat  — SSE 스트리밍 대화
-GET /history — 대화 메시지 목록
-GET /conversations — 세션 목록
+대화 라우터 (thin wrapper).
+비즈니스 로직은 services/chat_pipeline.py에 있다.
+
+POST   /chat              — SSE 스트리밍 대화
+GET    /history           — 대화 메시지 목록
+GET    /conversations     — 세션 목록
+DELETE /conversations/{id} — 대화 삭제
+POST   /feedback          — 피드백 전송
 """
 
-import asyncio
-import json
 import logging
-import time
-import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.models.schema import DB_PATH
-from backend.services.llm import stream_chat
-from backend.services.memory import search_memory, update_confidence
-from backend.services.mood import detect_mood_from_text, get_mood, set_mood
+from backend.services.chat_pipeline import run_chat_pipeline
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 하나 시스템에서 사용자 식별자 (현재는 단일 사용자)
-_OWNER_USER_ID = "owner"
-
 
 class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
+    interaction_type: Optional[str] = None   # 'coding' | 'chat' | 'game' | None
+    voice_mode: bool = False
+    audio_features: Optional[dict] = None    # {"energy": float, "rising_tone": bool}
+    owner_emotion: Optional[str] = None      # "NEUTRAL" | "HAPPY" | "DISTRESSED"
 
 
-async def _ensure_conversation(db: aiosqlite.Connection, conversation_id: str) -> None:
-    """conversation이 없으면 새로 생성한다."""
-    async with db.execute(
-        "SELECT id FROM conversations WHERE id = ?", (conversation_id,)
-    ) as cursor:
-        row = await cursor.fetchone()
-    if not row:
-        await db.execute(
-            "INSERT INTO conversations (id, started_at) VALUES (?, ?)",
-            (conversation_id, datetime.now(timezone.utc).isoformat()),
-        )
-        await db.commit()
-
-
-async def _load_recent_messages(
-    db: aiosqlite.Connection, conversation_id: str, limit: int = 20
-) -> list[dict]:
-    """최근 대화 컨텍스트를 불러온다."""
-    async with db.execute(
-        "SELECT role, content FROM messages "
-        "WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?",
-        (conversation_id, limit),
-    ) as cursor:
-        rows = await cursor.fetchall()
-    # 최신순으로 가져왔으니 역순으로 반환
-    return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
-
-
-async def _get_last_assistant_time(
-    db: aiosqlite.Connection, conversation_id: str
-) -> Optional[datetime]:
-    """마지막 assistant 메시지의 created_at을 반환한다."""
-    async with db.execute(
-        "SELECT created_at FROM messages "
-        "WHERE conversation_id = ? AND role = 'assistant' "
-        "ORDER BY created_at DESC LIMIT 1",
-        (conversation_id,),
-    ) as cursor:
-        row = await cursor.fetchone()
-    if not row:
-        return None
-    ts = row[0]
-    # SQLite는 timezone 정보가 없을 수 있으므로 UTC로 파싱
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
-
-
-async def _save_message(
-    db: aiosqlite.Connection,
-    message_id: str,
-    conversation_id: str,
-    role: str,
-    content: str,
-    mood: Optional[str] = None,
-    response_time_ms: Optional[int] = None,
-    owner_response_delay_ms: Optional[int] = None,
-) -> None:
-    await db.execute(
-        """
-        INSERT INTO messages
-            (id, conversation_id, role, content, mood_at_response,
-             response_time_ms, owner_response_delay_ms, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            message_id,
-            conversation_id,
-            role,
-            content,
-            mood,
-            response_time_ms,
-            owner_response_delay_ms,
-            datetime.now(timezone.utc).isoformat(),
-        ),
-    )
-    await db.commit()
+class FeedbackRequest(BaseModel):
+    message_id: str
+    score: Optional[int] = None       # 1~5 (명시적 피드백)
+    positive: Optional[bool] = None   # True=thumbs up, False=thumbs down
+    experience_id: Optional[str] = None
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest) -> StreamingResponse:
+async def chat(req: ChatRequest, background_tasks: BackgroundTasks) -> StreamingResponse:
     if not req.message.strip():
-        raise HTTPException(status_code=400, detail={
-            "error": True,
-            "code": "EMPTY_MESSAGE",
-            "message": "메시지가 비어있어.",
-        })
-
-    conversation_id = req.conversation_id or str(uuid.uuid4())
-    request_time = datetime.now(timezone.utc)
-    logger.info(f"/chat request received: conversation_id={conversation_id}")
-
-    async def event_stream():
-        async with aiosqlite.connect(DB_PATH) as db:
-            await _ensure_conversation(db, conversation_id)
-
-            # 오너 응답 딜레이 계산 (마지막 assistant 메시지 기준)
-            last_time = await _get_last_assistant_time(db, conversation_id)
-            delay_ms = (
-                int((request_time - last_time).total_seconds() * 1000)
-                if last_time
-                else None
-            )
-
-            user_msg_id = str(uuid.uuid4())
-            await _save_message(
-                db, user_msg_id, conversation_id, "user", req.message,
-                owner_response_delay_ms=delay_ms,
-            )
-
-            # 대화 히스토리 로드와 메모리 검색을 병렬 수행
-            history, memories = await asyncio.gather(
-                _load_recent_messages(db, conversation_id),
-                search_memory(_OWNER_USER_ID, req.message),
-            )
-
-            # 참조된 기억의 confidence 업데이트
-            for mem in memories:
-                await update_confidence(mem["id"], delta=0.1)
-
-            # 메모리를 시스템 프롬프트에 주입할 형식으로 조합
-            memory_context: Optional[str] = None
-            if memories:
-                memory_context = "\n".join(f"- {m['fact']}" for m in memories)
-
-            assistant_msg_id = str(uuid.uuid4())
-            full_response = []
-            start_ms = int(time.time() * 1000)
-
-            try:
-                async for token in stream_chat(history, memory_context=memory_context):
-                    full_response.append(token)
-                    yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
-            except Exception as exc:
-                logger.error(f"/chat LLM error: conversation_id={conversation_id} error={exc}")
-                yield f"data: {json.dumps({'type': 'error', 'code': 'LLM_UNAVAILABLE', 'message': str(exc)}, ensure_ascii=False)}\n\n"
-                return
-
-            elapsed_ms = int(time.time() * 1000) - start_ms
-
-            # 응답 내용 기반으로 무드 자동 감지 및 업데이트
-            full_text = "".join(full_response)
-            detected_mood = detect_mood_from_text(full_text)
-            set_mood(detected_mood)
-            current_mood = detected_mood
-
-            await _save_message(
-                db,
-                assistant_msg_id,
-                conversation_id,
-                "assistant",
-                "".join(full_response),
-                mood=current_mood,
-                response_time_ms=elapsed_ms,
-            )
-
-            done_event = {
-                "type": "done",
-                "message_id": assistant_msg_id,
-                "conversation_id": conversation_id,
-                "mood": current_mood,
-            }
-            yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
-            yield "data: [DONE]\n\n"
-            logger.info(f"/chat response complete: conversation_id={conversation_id} elapsed_ms={elapsed_ms}")
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": True,
+                "code": "EMPTY_MESSAGE",
+                "message": "메시지가 비어있어.",
+            },
+        )
+    return await run_chat_pipeline(
+        message=req.message,
+        conversation_id=req.conversation_id,
+        interaction_type=req.interaction_type,
+        voice_mode=req.voice_mode,
+        audio_features=req.audio_features,
+        owner_emotion=req.owner_emotion,
+        background_tasks=background_tasks,
+    )
 
 
 @router.get("/history")
@@ -223,10 +80,10 @@ async def history(conversation_id: str, limit: int = 50) -> dict:
 
     messages = [
         {
-            "id": r[0],
-            "role": r[1],
-            "content": r[2],
-            "mood": r[3],
+            "id":         r[0],
+            "role":       r[1],
+            "content":    r[2],
+            "mood":       r[3],
             "created_at": r[4],
         }
         for r in rows
@@ -253,3 +110,70 @@ async def conversations(limit: int = 20) -> dict:
         for r in rows
     ]
     return {"conversations": result}
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str) -> dict:
+    """대화와 관련 메시지, 피드백 레코드를 모두 삭제한다."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # 먼저 해당 conversation 존재 여부 확인
+        async with db.execute(
+            "SELECT id FROM conversations WHERE id = ?", (conversation_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": True, "code": "NOT_FOUND", "message": "대화를 찾을 수 없어."},
+            )
+
+        # feedback → messages → conversation 순으로 삭제 (FK 참조 순서)
+        await db.execute(
+            "DELETE FROM feedback WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)",
+            (conversation_id,),
+        )
+        await db.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+        await db.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        await db.commit()
+
+    logger.info(f"DELETE /conversations/{conversation_id}: deleted")
+    return {"success": True}
+
+
+@router.post("/feedback")
+async def feedback(req: FeedbackRequest) -> dict:
+    """명시적 피드백을 기록한다. experience_id가 있으면 점수 업데이트 시도."""
+    if req.score is not None and not (1 <= req.score <= 5):
+        raise HTTPException(status_code=400, detail={"error": True, "code": "INVALID_SCORE", "message": "score는 1~5 범위여야 해."})
+
+    # experience 점수 업데이트 스텁 (PROMPT_06에서 채워짐)
+    if req.experience_id is not None:
+        score = 0.9 if req.positive else 0.1
+        try:
+            from backend.services.experience_collector import update_experience_score  # type: ignore[import]
+            await update_experience_score(req.experience_id, score)
+        except (ImportError, Exception):
+            pass
+
+    # feedback 테이블에 저장
+    if req.message_id:
+        explicit_score: Optional[int] = req.score
+        if explicit_score is None and req.positive is not None:
+            explicit_score = 5 if req.positive else 1
+        if explicit_score is not None:
+            try:
+                async with aiosqlite.connect(DB_PATH) as db:
+                    await db.execute(
+                        """
+                        INSERT INTO feedback (message_id, explicit_score)
+                        VALUES (?, ?)
+                        ON CONFLICT(message_id) DO UPDATE SET explicit_score = excluded.explicit_score
+                        """,
+                        (req.message_id, explicit_score),
+                    )
+                    await db.commit()
+            except Exception as e:
+                logger.warning("feedback save error: %s", e)
+
+    return {"success": True}

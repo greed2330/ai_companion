@@ -4,17 +4,23 @@ import { buildApiUrl } from "../services/api";
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
 
-export default function useMoodStream({ onMoodChange, onModelChange }) {
+export default function useMoodStream({
+  onMoodChange,
+  onModelChange,
+  onRoomChange
+}) {
   const retriesRef = useRef(0);
   const reconnectTimerRef = useRef(null);
   const pollingTimerRef = useRef(null);
   const sourceRef = useRef(null);
   const onMoodChangeRef = useRef(onMoodChange);
   const onModelChangeRef = useRef(onModelChange);
+  const onRoomChangeRef = useRef(onRoomChange);
   const [mode, setMode] = useState("stream");
 
   onMoodChangeRef.current = onMoodChange;
   onModelChangeRef.current = onModelChange;
+  onRoomChangeRef.current = onRoomChange;
 
   useEffect(() => {
     async function pollMood() {
@@ -65,6 +71,11 @@ export default function useMoodStream({ onMoodChange, onModelChange }) {
         if (payload.type === "model_change") {
           retriesRef.current = 0;
           onModelChangeRef.current?.(payload.model_id || null);
+        }
+
+        if (payload.type === "room_change") {
+          retriesRef.current = 0;
+          onRoomChangeRef.current?.(payload);
         }
       };
 

@@ -1,3 +1,10 @@
+jest.mock("electron-store", () =>
+  jest.fn().mockImplementation(() => ({
+    get: jest.fn(),
+    set: jest.fn()
+  }))
+);
+
 jest.mock("electron", () => ({
   app: {
     isPackaged: false,
@@ -12,7 +19,8 @@ jest.mock("electron", () => ({
     unregisterAll: jest.fn()
   },
   ipcMain: {
-    handle: jest.fn()
+    handle: jest.fn(),
+    on: jest.fn()
   },
   Menu: {
     buildFromTemplate: jest.fn()

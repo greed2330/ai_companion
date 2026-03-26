@@ -25,8 +25,8 @@ def use_tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", db_file)
     import backend.models.schema as schema_mod
     monkeypatch.setattr(schema_mod, "DB_PATH", db_file)
-    import backend.routers.chat as chat_mod
-    monkeypatch.setattr(chat_mod, "DB_PATH", db_file)
+    import backend.services.chat_pipeline as cp_mod
+    monkeypatch.setattr(cp_mod, "DB_PATH", db_file)
     import backend.routers.memory as mem_mod
     monkeypatch.setattr(mem_mod, "DB_PATH", db_file)
 
@@ -163,6 +163,72 @@ _FAKE_TAGS = {
         {"name": "qwen3-vl:8b"},
     ]
 }
+
+
+@pytest.mark.asyncio
+async def test_settings_models_nested_structure(tmp_path, monkeypatch, client):
+    """중첩 폴더 안에 있는 모델 파일도 탐색돼야 한다."""
+    import backend.routers.settings as settings_mod
+
+    char_root = tmp_path / "assets" / "character"
+
+    # live2d 파일이 하위 폴더 안에 있는 경우
+    d1 = char_root / "nanoka"
+    (d1 / "runtime").mkdir(parents=True)
+    (d1 / "runtime" / "nanoka.model3.json").touch()
+
+    # pmx 파일이 하위 폴더 안에 있는 경우
+    d2 = char_root / "furina"
+    (d2 / "model").mkdir(parents=True)
+    (d2 / "model" / "furina.pmx").touch()
+
+    monkeypatch.setattr(settings_mod, "_CHARACTER_ROOT", char_root)
+
+    resp = await client.get("/settings/models")
+    assert resp.status_code == 200
+    models = {m["id"]: m for m in resp.json()["models"]}
+
+    assert models["nanoka"]["type"] == "live2d"
+    assert "runtime/nanoka.model3.json" in models["nanoka"]["path"]
+    assert models["furina"]["type"] == "pmx"
+    assert "model/furina.pmx" in models["furina"]["path"]
+
+
+@pytest.mark.asyncio
+async def test_settings_models_cjk_and_spaces(tmp_path, monkeypatch, client):
+    """CJK 파일명, 공백 포함 경로도 정상 탐색돼야 한다."""
+    import backend.routers.settings as settings_mod
+
+    char_root = tmp_path / "assets" / "character"
+
+    # assets/character/March_7th/March 7th/march 7th.model3.json
+    d1 = char_root / "March_7th" / "March 7th"
+    d1.mkdir(parents=True)
+    (d1 / "march 7th.model3.json").touch()
+
+    # assets/character/furina/【芙宁娜】.pmx
+    d2 = char_root / "furina"
+    d2.mkdir(parents=True)
+    (d2 / "【芙宁娜】.pmx").touch()
+    (d2 / "【芙宁娜_荒】.pmx").touch()  # 여러 PMX — 알파벳순 첫 번째 선택
+
+    monkeypatch.setattr(settings_mod, "_CHARACTER_ROOT", char_root)
+
+    resp = await client.get("/settings/models")
+    assert resp.status_code == 200
+    models = {m["id"]: m for m in resp.json()["models"]}
+
+    # Live2D: 중첩 + 공백 경로
+    assert "March_7th" in models
+    assert models["March_7th"]["type"] == "live2d"
+    assert "march 7th.model3.json" in models["March_7th"]["path"]
+
+    # PMX: CJK 파일명, 여러 PMX 중 정렬 첫 번째 선택 확인
+    assert "furina" in models
+    assert models["furina"]["type"] == "pmx"
+    assert models["furina"]["path"].endswith(".pmx")
+    # 정렬상 【芙宁娜_荒】 < 【芙宁娜】 (_가 】보다 유니코드 값이 작음)
+    assert "【芙宁娜_荒】.pmx" in models["furina"]["path"]
 
 
 @pytest.mark.asyncio

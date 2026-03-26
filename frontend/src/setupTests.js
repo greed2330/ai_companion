@@ -9,6 +9,10 @@ if (!global.TextDecoder) {
   global.TextDecoder = TextDecoder;
 }
 
+if (!window.HTMLElement.prototype.scrollIntoView) {
+  window.HTMLElement.prototype.scrollIntoView = jest.fn();
+}
+
 class MockBroadcastChannel {
   constructor(name) {
     this.name = name;
@@ -27,3 +31,43 @@ if (!global.BroadcastChannel) {
 }
 
 window.__VITE_API_BASE_URL__ = "http://test";
+window.hanaDesktop = {
+  closeWindow: jest.fn(),
+  endCharacterDrag: jest.fn(),
+  finishCharacterDrag: jest.fn(() => Promise.resolve()),
+  getAppSettings: jest.fn(() =>
+    Promise.resolve({
+      app: { theme: "dark-anime", shortcut: "Alt+H", autoLaunch: false },
+      character: { viewportScale: 100 },
+      integrations: {
+        serper: { status: "grey", apiKey: "" },
+        google_calendar: { status: "grey", apiKey: "" },
+        github: { status: "grey", apiKey: "" }
+      },
+      voice: { inputMode: "text", outputMode: "chat", ttsEnabled: false }
+    })
+  ),
+  getCharacterBounds: jest.fn(() =>
+    Promise.resolve({ x: 100, y: 100, width: 300, height: 400 })
+  ),
+  getCharacterState: jest.fn(() => Promise.resolve({ pinned: false })),
+  hideBubble: jest.fn(),
+  minimizeWindow: jest.fn(),
+  moveCharacterBy: jest.fn(() => Promise.resolve()),
+  startCharacterDrag: jest.fn(),
+  notifyAiNameChanged: jest.fn(),
+  notifyCharacterMouse: jest.fn(),
+  onBubbleData: jest.fn(() => () => {}),
+  onBubbleTail: jest.fn(() => () => {}),
+  onSetTab: jest.fn(() => () => {}),
+  quitApp: jest.fn(),
+  resolveAssetUrl: jest.fn(() => Promise.resolve("asset://mock")),
+  saveAppSettings: jest.fn((payload) => Promise.resolve(payload)),
+  showBubble: jest.fn(),
+  showMainChatWindow: jest.fn(),
+  showMainSettingsWindow: jest.fn(),
+  showChatWindow: jest.fn(() => Promise.resolve()),
+  showSettingsWindow: jest.fn(() => Promise.resolve()),
+  toggleCharacterPinned: jest.fn(() => Promise.resolve({ pinned: true })),
+  toggleMaximizeWindow: jest.fn()
+};

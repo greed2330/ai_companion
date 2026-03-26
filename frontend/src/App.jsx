@@ -1,25 +1,30 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import CharacterOverlay from "./components/CharacterOverlay";
-import ChatOverlay from "./components/ChatOverlay";
-import Settings from "./components/Settings";
+import BubbleWindow from "./components/bubble/BubbleWindow";
 import useMoodStream from "./hooks/useMoodStream";
+import MainWindow from "./pages/MainWindow";
 import { fetchModels } from "./services/settings";
 
 function CharacterScreen() {
   const [mood, setMood] = useState("IDLE");
   const [models, setModels] = useState([]);
   const [currentModelId, setCurrentModelId] = useState(null);
-  const [speech, setSpeech] = useState({ message: "", visible: false });
+  const [viewportScale, setViewportScale] = useState(1);
 
   useEffect(() => {
-    async function loadModels() {
-      const payload = await fetchModels();
+    fetchModels().then((payload) => {
       setModels(payload.models || []);
       setCurrentModelId(payload.current || null);
-    }
+    });
 
-    loadModels();
+    // Load persisted viewport scale from electron-store
+    window.hanaDesktop?.getAppSettings?.().then((appSettings) => {
+      const pct = appSettings?.character?.viewportScale;
+      if (pct != null) {
+        setViewportScale(pct / 100);
+      }
+    });
   }, []);
 
   useMoodStream({
@@ -29,19 +34,18 @@ function CharacterScreen() {
       const payload = await fetchModels();
       setModels(payload.models || []);
       setCurrentModelId(payload.current || modelId || null);
-    }
+    },
+    onRoomChange: () => {}
   });
 
   useEffect(() => {
     const channel = new BroadcastChannel("hana-overlay");
     channel.onmessage = (event) => {
-      if (event.data?.type !== "bubble") {
-        return;
+      if (event.data?.type === "character_model_selected") {
+        setCurrentModelId(event.data.modelId || null);
       }
-
-      setSpeech({ message: event.data.message || "", visible: true });
-      if (event.data.mood) {
-        setMood(event.data.mood);
+      if (event.data?.type === "viewport_scale_changed") {
+        setViewportScale(event.data.scale ?? 1);
       }
     };
 
@@ -53,53 +57,25 @@ function CharacterScreen() {
 
   return (
     <CharacterOverlay
+      initialScale={viewportScale}
       mood={mood}
-      modelPath={activeModel?.path || ""}
       modelName={activeModel?.name || "하나"}
-      speechMessage={speech.message}
-      speechVisible={speech.visible}
+      modelPath={activeModel?.path || ""}
     />
   );
 }
 
-function ChatScreen() {
-  const [mood, setMood] = useState("IDLE");
-
-  useMoodStream({
-    onMoodChange: setMood,
-    onModelChange: () => {}
-  });
-
-  function handleAssistantReply(message, replyMood) {
-    const channel = new BroadcastChannel("hana-overlay");
-    channel.postMessage({
-      type: "bubble",
-      message,
-      mood: replyMood
-    });
-    channel.close();
-  }
-
-  return (
-    <ChatOverlay
-      mood={mood}
-      onMoodChange={setMood}
-      onAssistantReply={handleAssistantReply}
-    />
-  );
-}
-
-function SettingsScreen() {
-  return <Settings />;
+function BubbleScreen() {
+  return <BubbleWindow />;
 }
 
 function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/character" replace />} />
+      <Route path="/bubble" element={<BubbleScreen />} />
       <Route path="/character" element={<CharacterScreen />} />
-      <Route path="/chat" element={<ChatScreen />} />
-      <Route path="/settings" element={<SettingsScreen />} />
+      <Route path="/main" element={<MainWindow />} />
       <Route path="*" element={<Navigate to="/character" replace />} />
     </Routes>
   );

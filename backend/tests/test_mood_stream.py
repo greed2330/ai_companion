@@ -9,7 +9,7 @@ import json
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # ── 공통 픽스처 ──────────────────────────────────────────────
@@ -22,8 +22,8 @@ def use_tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", db_file)
     import backend.models.schema as schema_mod
     monkeypatch.setattr(schema_mod, "DB_PATH", db_file)
-    import backend.routers.chat as chat_mod
-    monkeypatch.setattr(chat_mod, "DB_PATH", db_file)
+    import backend.services.chat_pipeline as cp_mod
+    monkeypatch.setattr(cp_mod, "DB_PATH", db_file)
     import backend.routers.memory as mem_mod
     monkeypatch.setattr(mem_mod, "DB_PATH", db_file)
 
@@ -44,6 +44,12 @@ def reset_mood():
     mood_mod._subscribers.clear()
     yield
     mood_mod._subscribers.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_character_model(monkeypatch):
+    import backend.routers.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "_current_character_model_id", None)
 
 
 @pytest_asyncio.fixture
@@ -175,13 +181,19 @@ async def test_heartbeat_sent_on_timeout(monkeypatch):
 @pytest.mark.asyncio
 async def test_mood_trigger_from_message(client):
     """POST /chat 응답에 에러 키워드가 있으면 CONCERNED 무드로 바뀌어야 한다."""
+    import backend.services.chat_pipeline as cp_mod
+
     mock_tokens = ["에러", " 났어요"]
 
-    async def fake_stream(history, memory_context=None):
+    async def fake_stream(messages, system_prompt, use_think):
         for t in mock_tokens:
             yield t
 
-    with patch("backend.routers.chat.stream_chat", side_effect=fake_stream):
+    mock_router = MagicMock()
+    mock_router.source = "ollama"
+    mock_router.stream = fake_stream
+    mock_router.call_for_json = AsyncMock(return_value={})
+    with patch.object(cp_mod, "llm_router", mock_router):
         response = await client.post(
             "/chat",
             json={"message": "도와줘", "conversation_id": None},
@@ -194,6 +206,46 @@ async def test_mood_trigger_from_message(client):
     assert done_chunk is not None
     done_data = json.loads(done_chunk.replace("data: ", "").strip())
     assert done_data["mood"] == "CONCERNED"
+
+
+# ── /mood/stream 헤더 테스트 ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mood_stream_headers():
+    """/mood/stream 응답에 SSE 필수 헤더가 포함돼야 한다."""
+    from backend.routers.mood import mood_stream
+
+    resp = await mood_stream()
+
+    assert resp.media_type == "text/event-stream"
+    assert resp.headers.get("cache-control") == "no-cache"
+    assert resp.headers.get("x-accel-buffering") == "no"
+
+    # 정리
+    await resp.body_iterator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_mood_stream_event_shape():
+    """mood_change 이벤트가 AGENTS.md 9-1 계약 형식과 일치해야 한다."""
+    import backend.services.mood as mood_mod
+    from backend.routers.mood import mood_stream
+
+    mood_mod._current_mood = "HAPPY"
+
+    resp = await mood_stream()
+    gen = resp.body_iterator
+
+    chunk = await gen.__anext__()
+    assert chunk.startswith("data:")
+    event = json.loads(chunk[len("data:"):].strip())
+
+    assert event["type"] == "mood_change"
+    assert event["mood"] == "HAPPY"
+    assert "updated_at" in event
+
+    await gen.aclose()
 
 
 # ── /settings/models 테스트 ──────────────────────────────────

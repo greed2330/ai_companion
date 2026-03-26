@@ -8,13 +8,23 @@ function parseSseLine(line) {
   return line.slice(5).trim();
 }
 
-export async function streamChat({ message, conversationId, onToken, onDone }) {
+export async function streamChat({
+  message,
+  conversationId,
+  interactionType,
+  voiceMode = false,
+  onToken,
+  onDone,
+  onRoomChange
+}) {
   const response = await fetch(buildApiUrl("/chat"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       message,
-      conversation_id: conversationId ?? null
+      conversation_id: conversationId ?? null,
+      interaction_type: interactionType ?? null,
+      voice_mode: voiceMode
     })
   });
 
@@ -53,6 +63,10 @@ export async function streamChat({ message, conversationId, onToken, onDone }) {
 
       if (event.type === "done") {
         onDone(event);
+      }
+
+      if (event.type === "room_change") {
+        onRoomChange?.(event);
       }
 
       if (event.type === "error") {

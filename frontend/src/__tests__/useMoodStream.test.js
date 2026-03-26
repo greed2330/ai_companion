@@ -31,11 +31,15 @@ describe("useMoodStream", () => {
     jest.resetAllMocks();
   });
 
-  test("connects to /mood/stream and updates mood state on event", async () => {
+  test("connects to /mood/stream and updates mood state on event", () => {
     const onMoodChange = jest.fn();
 
     renderHook(() =>
-      useMoodStream({ onMoodChange, onModelChange: jest.fn() })
+      useMoodStream({
+        onMoodChange,
+        onModelChange: jest.fn(),
+        onRoomChange: jest.fn()
+      })
     );
 
     expect(MockEventSource.instances[0].url).toBe("http://test/mood/stream");
@@ -46,10 +50,41 @@ describe("useMoodStream", () => {
     expect(onMoodChange).toHaveBeenCalledWith("HAPPY");
   });
 
+  test("passes room_change events through", () => {
+    const onRoomChange = jest.fn();
+
+    renderHook(() =>
+      useMoodStream({
+        onMoodChange: jest.fn(),
+        onModelChange: jest.fn(),
+        onRoomChange
+      })
+    );
+
+    MockEventSource.instances[0].onmessage({
+      data: JSON.stringify({
+        type: "room_change",
+        room_type: "coding",
+        message: "코딩 대화로 바꿀게~"
+      })
+    });
+
+    expect(onRoomChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        room_type: "coding",
+        message: "코딩 대화로 바꿀게~"
+      })
+    );
+  });
+
   test("falls back to polling after 5 failures", async () => {
     const onMoodChange = jest.fn();
     const { result } = renderHook(() =>
-      useMoodStream({ onMoodChange, onModelChange: jest.fn() })
+      useMoodStream({
+        onMoodChange,
+        onModelChange: jest.fn(),
+        onRoomChange: jest.fn()
+      })
     );
 
     for (let index = 0; index < 5; index += 1) {

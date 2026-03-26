@@ -1,13 +1,15 @@
 """
 설정 라우터.
-GET  /settings/models          — assets/character/ 스캔, Live2D + PMX 모델 목록 반환
-POST /settings/models/select   — 현재 캐릭터 모델 변경 + /mood/stream push
-GET  /settings/llm/models      — Ollama 설치 모델 목록 + 현재 챗 모델 반환
-POST /settings/llm/select      — 챗 모델 변경
+GET  /settings/models                        — assets/character/ 스캔, Live2D + PMX 모델 목록 반환
+POST /settings/models/select                 — 현재 캐릭터 모델 변경 + /mood/stream push
+GET  /settings/llm/models                    — Ollama 설치 모델 목록 + 현재 챗 모델 반환
+POST /settings/llm/select                    — 챗 모델 변경
+POST /settings/integrations/{name}/test      — 외부 연동 API 키 연결 테스트
 """
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,8 +17,19 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.services.llm import build_system_prompt, complete_chat
+from backend.services.llm_router import llm_router
+from backend.services.model_context_service import (
+    get_current_context,
+    on_model_changed,
+)
 from backend.services.mood import push_event
-from backend.services.settings_service import get_current_chat_model, set_current_chat_model
+from backend.services.settings_service import (
+    get_current_chat_model,
+    get_persona,
+    set_current_chat_model,
+    set_persona,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +62,7 @@ def _scan_models() -> list[dict]:
         if not entry.is_dir():
             continue
 
-        live2d_files = list(entry.glob("*.model3.json"))
+        live2d_files = sorted(entry.rglob("*.model3.json"))
         if live2d_files:
             model_file = live2d_files[0]
             models.append({
@@ -60,7 +73,7 @@ def _scan_models() -> list[dict]:
             })
             continue
 
-        pmx_files = list(entry.glob("*.pmx"))
+        pmx_files = sorted(entry.rglob("*.pmx"))
         if pmx_files:
             model_file = pmx_files[0]
             models.append({
@@ -136,6 +149,13 @@ async def select_character_model(req: SelectCharacterModelRequest) -> dict:
     _current_character_model_id = req.model_id
     logger.info(f"/settings/models/select: character model changed to {req.model_id}")
 
+    # 선택된 모델의 파라미터 컨텍스트 업데이트
+    selected = next(m for m in models if m["id"] == req.model_id)
+    try:
+        await on_model_changed(req.model_id, selected["path"], selected["type"])
+    except Exception as e:
+        logger.warning(f"model_context update failed: {e}")
+
     push_event({
         "type": "model_change",
         "model_id": req.model_id,
@@ -196,3 +216,255 @@ async def select_llm_model(req: SelectLlmModelRequest) -> dict:
     logger.info(f"/settings/llm/select: chat model changed to {req.model_id}")
 
     return {"success": True, "current_chat_model": req.model_id}
+
+
+# ── 페르소나 엔드포인트 ───────────────────────────────────────────
+
+
+@router.get("/settings/persona")
+async def get_persona_settings() -> dict:
+    """현재 페르소나 설정을 반환한다."""
+    persona = get_persona()
+    logger.info("/settings/persona GET")
+    return persona
+
+
+class PersonaRequest(BaseModel):
+    ai_name: str = "하나"
+    owner_nickname: str = ""
+    speech_style: str = ""
+    speech_preset: str = "bright_friend"
+    personality: str = ""
+    personality_preset: str = "energetic"
+    interests: str = ""
+
+
+@router.post("/settings/persona")
+async def update_persona(req: PersonaRequest) -> dict:
+    """
+    페르소나 설정을 변경한다. data/settings.json에 저장.
+    다음 /chat 요청부터 시스템 프롬프트에 반영된다.
+    """
+    set_persona(req.model_dump())
+    logger.info(f"/settings/persona POST: ai_name={req.ai_name}")
+    return {"success": True}
+
+
+class PersonaPreviewRequest(BaseModel):
+    ai_name: str = "하나"
+    owner_nickname: str = ""
+    speech_style: str = ""
+    speech_preset: str = "bright_friend"
+    personality: str = ""
+    personality_preset: str = "energetic"
+    interests: str = ""
+
+
+@router.post("/settings/persona/preview")
+async def preview_persona(req: PersonaPreviewRequest) -> dict:
+    """
+    임시 페르소나로 LLM을 3회 호출해 말투 샘플을 반환한다.
+    저장하지 않는다. think 모드 강제 비활성화.
+    """
+    persona = req.model_dump()
+    system_prompt = build_system_prompt(mood="IDLE", persona=persona, voice_mode=False)
+    test_message = [{"role": "user", "content": "안녕! 오늘 어땠어?"}]
+
+    samples: list[str] = []
+    for _ in range(3):
+        try:
+            response = await complete_chat(
+                test_message,
+                system_prompt=system_prompt,
+                use_think=False,
+            )
+            samples.append(response.strip())
+        except Exception as e:
+            logger.error(f"/settings/persona/preview LLM error: {e}")
+            samples.append("(응답 생성 실패)")
+
+    logger.info(f"/settings/persona/preview: generated {len(samples)} samples")
+    return {"samples": samples}
+
+
+# ── LLM 소스 설정 엔드포인트 ─────────────────────────────────────
+
+
+@router.get("/settings/llm")
+async def get_llm_settings() -> dict:
+    """현재 LLM 소스 설정을 반환한다."""
+    return {
+        "source":             llm_router.source,
+        "api_key_masked":     "***" if llm_router._api_key else None,
+        "endpoint":           llm_router._custom_endpoint,
+        "protocol_connected": llm_router._protocol_connected,
+    }
+
+
+class LlmConfigRequest(BaseModel):
+    source: str               # "ollama" | "openai" | "anthropic" | "custom"
+    api_key: str = ""
+    endpoint: str = ""
+
+
+@router.post("/settings/llm")
+async def configure_llm(req: LlmConfigRequest) -> dict:
+    """LLM 소스를 변경한다. in-memory 업데이트 + data/settings.json 저장."""
+    llm_router.configure(
+        source=req.source,
+        api_key=req.api_key or None,
+        endpoint=req.endpoint or None,
+    )
+    # settings.json에 소스 정보 저장 (api_key 제외 — 보안)
+    from backend.services.settings_service import _read_settings, _write_settings
+    data = _read_settings()
+    data["llm_source"] = {
+        "source":   req.source,
+        "endpoint": req.endpoint or None,
+    }
+    _write_settings(data)
+    logger.info(f"/settings/llm POST: source={req.source}")
+    return {"success": True, "source": req.source}
+
+
+class LlmTestRequest(BaseModel):
+    source: str
+    api_key: str = ""
+    endpoint: str = ""
+
+
+@router.post("/settings/llm/test")
+async def test_llm_connection(req: LlmTestRequest) -> dict:
+    """임시로 소스를 설정해 연결을 테스트한다. 설정은 저장하지 않는다."""
+    original_source = llm_router.source
+    original_key = llm_router._api_key
+    original_endpoint = llm_router._custom_endpoint
+
+    try:
+        llm_router.configure(
+            source=req.source,
+            api_key=req.api_key or None,
+            endpoint=req.endpoint or None,
+        )
+        result = await llm_router.test_connection()
+    finally:
+        # 원복
+        llm_router.source = original_source
+        llm_router._api_key = original_key
+        llm_router._custom_endpoint = original_endpoint
+
+    logger.info(f"/settings/llm/test: source={req.source} success={result.get('success')}")
+    return result
+
+
+class ProtocolConnectRequest(BaseModel):
+    endpoint: str
+
+
+@router.post("/settings/llm/protocol/connect")
+async def connect_protocol(req: ProtocolConnectRequest) -> dict:
+    """Professor emotion protocol에 연결한다."""
+    llm_router.configure(source="protocol", endpoint=req.endpoint)
+    logger.info(f"/settings/llm/protocol/connect: endpoint={req.endpoint}")
+    return {"success": True, "protocol_connected": True}
+
+
+@router.delete("/settings/llm/protocol")
+async def disconnect_protocol() -> dict:
+    """Protocol 연결을 해제하고 ollama fallback으로 복귀한다."""
+    llm_router.disconnect_protocol()
+    llm_router.source = "ollama"
+    logger.info("/settings/llm/protocol DELETE: disconnected")
+    return {"success": True, "protocol_connected": False}
+
+
+# ── 모델 컨텍스트 엔드포인트 ─────────────────────────────────────
+
+
+@router.get("/settings/models/current-context")
+async def get_model_context() -> dict:
+    """
+    현재 선택된 캐릭터 모델의 파라미터 컨텍스트를 반환한다.
+    05-D generative motion system에서 사용.
+    """
+    ctx = get_current_context()
+    if not ctx:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": True,
+                "code": "NO_MODEL_CONTEXT",
+                "message": "No model context. Select a character model first.",
+            },
+        )
+    return ctx
+
+
+# ── 외부 연동 테스트 엔드포인트 ───────────────────────────────────
+
+_INTEGRATION_HANDLERS: dict[str, str] = {
+    "serper":           "https://google.serper.dev/search",
+    "google_calendar":  "",    # OAuth 필요 — ping 불가
+    "github":           "https://api.github.com/user",
+}
+
+
+class IntegrationTestRequest(BaseModel):
+    api_key: str
+
+
+@router.post("/settings/integrations/{name}/test")
+async def test_integration(name: str, req: IntegrationTestRequest) -> dict:
+    """
+    외부 연동 API 키 연결을 테스트한다. 저장하지 않음.
+    성공 시: {"success": true, "response_ms": <int>}
+    실패 시: {"success": false, "error": "<message>"}
+    """
+    if name not in _INTEGRATION_HANDLERS:
+        raise HTTPException(status_code=404, detail={
+            "error": True,
+            "code": "UNKNOWN_INTEGRATION",
+            "message": f"'{name}' 연동은 지원하지 않아.",
+        })
+
+    if not req.api_key:
+        return {"success": False, "error": "API 키가 없어."}
+
+    # google_calendar는 OAuth 흐름 필요 — 단순 ping 불가
+    if name == "google_calendar":
+        return {"success": False, "error": "Google Calendar는 OAuth 인증이 필요해. (Phase 4에서 지원)"}
+
+    endpoint = _INTEGRATION_HANDLERS[name]
+    headers: dict[str, str] = {}
+
+    if name == "serper":
+        headers = {"X-API-KEY": req.api_key, "Content-Type": "application/json"}
+        body = {"q": "test", "num": 1}
+    elif name == "github":
+        headers = {"Authorization": f"token {req.api_key}", "Accept": "application/vnd.github.v3+json"}
+        body = None
+
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if name == "serper":
+                resp = await client.post(endpoint, headers=headers, json=body)
+            else:
+                resp = await client.get(endpoint, headers=headers)
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+
+        if resp.status_code in (200, 201):
+            logger.info(f"/settings/integrations/{name}/test: success ({elapsed_ms}ms)")
+            return {"success": True, "response_ms": elapsed_ms}
+
+        logger.warning(f"/settings/integrations/{name}/test: HTTP {resp.status_code}")
+        return {"success": False, "error": f"HTTP {resp.status_code}"}
+
+    except httpx.TimeoutException:
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        logger.warning(f"/settings/integrations/{name}/test: timeout after {elapsed_ms}ms")
+        return {"success": False, "error": "연결 시간 초과"}
+    except Exception as e:
+        logger.error(f"/settings/integrations/{name}/test: {e}")
+        return {"success": False, "error": str(e)}
