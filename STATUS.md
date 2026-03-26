@@ -29,9 +29,9 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase3-llm-router (커밋 완료, PR 대기)
+현재 작업 브랜치: claude/phase4-memory-experience (커밋 완료, PR 대기)
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: LLM Router + Dual-Call Pipeline + Session Judge + Reaction Engine (2026-03-24)
+마지막 완료: Phase 4 Memory System + Experience Self-Formation Pipeline (2026-03-26)
 블로커: 없음
 다음 작업: dev 머지 후 다음 PROMPT 작업 대기
 ```
@@ -141,6 +141,21 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] backend/tests/test_llm_router_and_pipeline.py: 36개 테스트
 - [x] 기존 테스트 6개 파일 패치 업데이트 (chat_mod → cp_mod, llm_router mock)
 - [x] 전체 테스트 137/137 통과
+
+**완료된 태스크 (Phase 4 Memory System + Experience Self-Formation):**
+- [x] backend/models/experience.py: SensoryData/IntegratedRead/HanaInternal/LearningOutput/Experience dataclasses
+- [x] backend/services/memory_service.py: ChromaDB 멀티-컬렉션 (volatile/longterm/experience/preference/dataset) + 마이그레이션 + decay
+- [x] backend/services/sensory_integrator.py: 멀티모달 감각 통합 (audio mismatch > visual > text 우선순위, 규칙 기반)
+- [x] backend/services/experience_collector.py: fire-and-forget 경험 수집 (_background_process 연결)
+- [x] backend/services/preference_system.py: 선호 신호 누적 + 임계값(5회) 초과 시 longterm 자동 승격
+- [x] backend/services/preference_service.py: context_builder.py 스텁 호환 re-export
+- [x] backend/services/philosophy_service.py: 철학적 순간 추적 + revisit_count
+- [x] backend/services/llm_router.py: call_for_text() 헬퍼 추가
+- [x] backend/tasks/decay_tasks.py: ChromaDB longterm decay 통합 + volatile 압축 Celery 태스크
+- [x] backend/celery_app.py: daily-volatile-compress 스케줄 추가 (새벽 1시)
+- [x] backend/main.py: 시작 시 레거시 컬렉션 마이그레이션
+- [x] backend/routers/memory.py: GET /memory/longterm, GET/DELETE /experience/*, GET /experience/preferences, GET /experience/philosophical
+- [x] backend/tests/test_memory_experience.py: 38개 신규 테스트 — 175/175 전부 통과
 
 **Codex에게 전달할 브리핑:**
 - 능동 알림 주기 제어 API 완료.
