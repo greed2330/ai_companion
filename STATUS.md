@@ -33,6 +33,7 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 현재 작업 중인 파일: 없음 (소유권 해제)
 마지막 완료: Phase 4.5 TTS/STT 전체 — backend + frontend (2026-03-26)
 블로커: 없음
+
 다음 작업 (단위별):
   - [x] Unit 1: backend STT (Whisper) + POST /voice/stt ✅
   - [x] Unit 2: frontend 마이크 버튼 + STT 연결 ✅
@@ -147,6 +148,7 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] backend/tests/test_llm_router_and_pipeline.py: 36개 테스트
 - [x] 기존 테스트 6개 파일 패치 업데이트 (chat_mod → cp_mod, llm_router mock)
 - [x] 전체 테스트 137/137 통과
+
 
 **완료된 태스크 (Phase 4 Memory System + Experience Self-Formation):**
 - [x] backend/models/experience.py: SensoryData/IntegratedRead/HanaInternal/LearningOutput/Experience dataclasses

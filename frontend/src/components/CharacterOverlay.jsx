@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import {
   applyGaze,
@@ -7,32 +7,18 @@ import {
   loadCharacterModel
 } from "./characterRenderer";
 import {
-  createPettingTracker,
-  getClickZone,
   getGazeOffset,
-  TIPS,
-  ZONE_REACTIONS
+  TIPS
 } from "./character/interactionUtils";
-import { requestReactionBubble } from "../services/reactions";
 
-function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
+function CharacterOverlay({ mood, modelPath = "", modelName = "하나", initialScale = 1 }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const dragRef = useRef(null);
-  const pettingTracker = useMemo(
-    () =>
-      createPettingTracker(() => {
-        window.hanaDesktop?.showBubble?.({
-          message: "기분 좋다~",
-          mood: "HAPPY",
-          type: "talk"
-        });
-      }),
-    []
-  );
+  const prevInitialScaleRef = useRef(initialScale);
   const [hasRenderableModel, setHasRenderableModel] = useState(false);
   const [menuState, setMenuState] = useState({ open: false, x: 0, y: 0 });
-  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: initialScale });
   const [pinned, setPinned] = useState(false);
   const [tipIndex, setTipIndex] = useState(0);
 
@@ -83,6 +69,14 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
     });
   }, []);
 
+  // Apply scale from settings when it changes (e.g. after user confirms settings)
+  useEffect(() => {
+    if (initialScale !== prevInitialScaleRef.current) {
+      prevInitialScaleRef.current = initialScale;
+      setViewport((current) => ({ ...current, scale: initialScale }));
+    }
+  }, [initialScale]);
+
   useEffect(() => {
     const timer = window.setInterval(() => {
       setTipIndex((current) => (current + 1) % TIPS.length);
@@ -94,30 +88,9 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
     setMenuState((current) => ({ ...current, open: false }));
   }
 
-  async function triggerZoneReaction(event) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const zone = getClickZone(event.clientY - bounds.top, bounds.height);
-    const reaction = ZONE_REACTIONS[zone];
-
-    try {
-      const bubble = await requestReactionBubble(reaction.prompt);
-      window.hanaDesktop?.showBubble?.({
-        message: bubble.message || reaction.emoji,
-        mood: bubble.mood || reaction.mood,
-        type: "talk"
-      });
-    } catch {
-      window.hanaDesktop?.showBubble?.({
-        message: reaction.emoji,
-        mood: reaction.mood,
-        type: "talk"
-      });
-    }
-  }
-
   function handleMouseDown(event) {
     closeMenu();
-    if (event.button === 0 || event.button === 1 || event.button === 2) {
+    if (event.button === 0 || event.button === 1) {
       dragRef.current = {
         button: event.button,
         moved: false,
@@ -126,14 +99,59 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
         screenX: event.screenX,
         screenY: event.screenY
       };
+    } else if (event.button === 2) {
+      // Right-click: use document-level listeners so mouseleave on the overlay
+      // window doesn't break the drag when the window itself moves
+      dragRef.current = {
+        button: 2,
+        moved: false,
+        startX: event.clientX,
+        startY: event.clientY,
+        screenX: event.screenX,
+        screenY: event.screenY
+      };
+      window.hanaDesktop?.startCharacterDrag?.();
+
+      const onMove = (e) => {
+        const cur = dragRef.current;
+        if (!cur || cur.button !== 2) {
+          return;
+        }
+        const dist = Math.hypot(e.clientX - cur.startX, e.clientY - cur.startY);
+        if (dist > 5) {
+          cur.moved = true;
+        }
+        window.hanaDesktop?.moveCharacterBy?.(
+          e.screenX - cur.screenX,
+          e.screenY - cur.screenY
+        );
+        cur.screenX = e.screenX;
+        cur.screenY = e.screenY;
+      };
+
+      const onUp = (e) => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        const cur = dragRef.current;
+        if (!cur || cur.button !== 2) {
+          return;
+        }
+        dragRef.current = null;
+        window.hanaDesktop?.finishCharacterDrag?.();
+        window.hanaDesktop?.endCharacterDrag?.();
+        if (!cur.moved) {
+          setMenuState({ open: true, x: e.clientX, y: e.clientY });
+        }
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
     }
   }
 
   function handleMouseMove(event) {
     const currentDrag = dragRef.current;
     const bounds = event.currentTarget.getBoundingClientRect();
-    const zone = getClickZone(event.clientY - bounds.top, bounds.height);
-    pettingTracker.update({ movementX: event.movementX, zone });
 
     window.hanaDesktop?.getCharacterBounds?.().then((charBounds) => {
       const gaze = getGazeOffset(event.screenX, event.screenY, charBounds || {
@@ -157,15 +175,7 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
       currentDrag.moved = true;
     }
 
-    if (currentDrag.button === 2) {
-      window.hanaDesktop?.moveCharacterBy?.(
-        event.screenX - currentDrag.screenX,
-        event.screenY - currentDrag.screenY
-      );
-      currentDrag.screenX = event.screenX;
-      currentDrag.screenY = event.screenY;
-    }
-
+    // Button 2 (window drag) is handled by document-level listener in handleMouseDown
     if (currentDrag.button === 1) {
       setViewport((current) => ({
         ...current,
@@ -177,21 +187,11 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
 
   function handleMouseUp(event) {
     const currentDrag = dragRef.current;
-    dragRef.current = null;
-    if (!currentDrag) {
+    // Button 2 drag is fully managed by the document-level onUp added in handleMouseDown
+    if (!currentDrag || currentDrag.button === 2) {
       return;
     }
-
-    if (currentDrag.button === 2) {
-      window.hanaDesktop?.finishCharacterDrag?.();
-      if (!currentDrag.moved) {
-        setMenuState({ open: true, x: event.clientX, y: event.clientY });
-      }
-    }
-
-    if (currentDrag.button === 0 && !currentDrag.moved) {
-      triggerZoneReaction(event);
-    }
+    dragRef.current = null;
   }
 
   function handleWheel(event) {
@@ -220,9 +220,12 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
       onMouseDown={handleMouseDown}
       onMouseEnter={() => window.hanaDesktop?.notifyCharacterMouse?.(true)}
       onMouseLeave={() => {
-        dragRef.current = null;
-        pettingTracker.reset();
-        window.hanaDesktop?.notifyCharacterMouse?.(false);
+        // Do not clear drag state or disable mouse events while window-dragging (button 2)
+        // — the window is moving so the cursor naturally leaves the overlay bounds
+        if (dragRef.current?.button !== 2) {
+          dragRef.current = null;
+          window.hanaDesktop?.notifyCharacterMouse?.(false);
+        }
       }}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -271,10 +274,11 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나" }) {
 }
 
 CharacterOverlay.propTypes = {
+  initialScale: PropTypes.number,
   mood: PropTypes.string.isRequired,
   modelPath: PropTypes.string,
   modelName: PropTypes.string
 };
 
-export { detectModelType, getClickZone, createPettingTracker };
+export { detectModelType };
 export default CharacterOverlay;

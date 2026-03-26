@@ -141,7 +141,8 @@ export default function useSettings() {
         const nextSaved = mergeDeep(DEFAULT_SETTINGS, {
           character: {
             modelId: currentCharacter?.id || "",
-            modelType: currentCharacter?.type?.toUpperCase() || "Live2D"
+            modelType: currentCharacter?.type?.toUpperCase() || "Live2D",
+            viewportScale: appSettings?.character?.viewportScale ?? 100
           },
           persona,
           aiModel: {
@@ -177,11 +178,13 @@ export default function useSettings() {
   );
 
   function updatePending(section, value) {
-    setPending((current) =>
-      mergeDeep(current || {}, {
-        [section]: mergeDeep((effective || DEFAULT_SETTINGS)[section], value)
-      })
-    );
+    setPending((current) => {
+      const base = (effective || DEFAULT_SETTINGS)[section];
+      const merged = mergeDeep(base, value);
+      // Re-derive parent group flags whenever an autonomous child changes
+      const normalized = section === "autonomous" ? normalizeAutonomous(merged) : merged;
+      return mergeDeep(current || {}, { [section]: normalized });
+    });
   }
 
   async function handleConfirm() {
@@ -206,6 +209,7 @@ export default function useSettings() {
 
     await window.hanaDesktop?.saveAppSettings?.({
       app: next.app,
+      character: { viewportScale: next.character.viewportScale },
       integrations: next.integrations,
       voice: next.voice
     });
@@ -214,13 +218,23 @@ export default function useSettings() {
       window.hanaDesktop?.notifyAiNameChanged?.(next.persona.ai_name);
     }
 
+    // Broadcast scale to character overlay window if it changed
+    if (next.character.viewportScale !== saved?.character?.viewportScale) {
+      try {
+        const bc = new BroadcastChannel("hana-overlay");
+        bc.postMessage({ type: "viewport_scale_changed", scale: next.character.viewportScale / 100 });
+        bc.close();
+      } catch (_) { /* ignore in environments without BroadcastChannel */ }
+    }
+
+    applyTheme(next.app.theme);
     setSaved(next);
     setPending(null);
   }
 
   function handleCancel() {
     setPending(null);
-    applyTheme((saved || DEFAULT_SETTINGS).app.theme);
+    // No need to revert DOM — theme is only applied on confirm, not on pending change
   }
 
   async function handleReset() {
@@ -238,6 +252,7 @@ export default function useSettings() {
     });
     await window.hanaDesktop?.saveAppSettings?.({
       app: DEFAULT_SETTINGS.app,
+      character: { viewportScale: DEFAULT_SETTINGS.character.viewportScale },
       integrations: DEFAULT_SETTINGS.integrations,
       voice: DEFAULT_SETTINGS.voice
     });
@@ -247,8 +262,8 @@ export default function useSettings() {
   }
 
   function handleThemeChange(theme) {
+    // Only update pending — theme is applied to DOM on handleConfirm, not immediately
     updatePending("app", { theme });
-    applyTheme(theme);
   }
 
   return {
