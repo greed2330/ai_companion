@@ -13,7 +13,7 @@ import {
   getGazeOffset,
   ZONE_REACTIONS,
 } from "./character/interactionUtils";
-import { requestReactionBubble } from "../services/reactions";
+// import { requestReactionBubble } from "../services/reactions";
 import { characterController } from "../services/characterController";
 
 function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하나" }) {
@@ -179,26 +179,8 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
     setMenuState((current) => ({ ...current, open: false }));
   }
 
-  async function triggerZoneReaction(event) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const zone = getClickZone(event.clientY - bounds.top, bounds.height);
-    const reaction = ZONE_REACTIONS[zone];
-
-    try {
-      const bubble = await requestReactionBubble(reaction.prompt);
-      window.hanaDesktop?.showBubble?.({
-        message: bubble.message || reaction.emoji,
-        mood: bubble.mood || reaction.mood,
-        type: "talk",
-      });
-    } catch {
-      window.hanaDesktop?.showBubble?.({
-        message: reaction.emoji,
-        mood: reaction.mood,
-        type: "talk",
-      });
-    }
-  }
+  // triggerZoneReaction: LLM 호출로 conversation 스팸 발생 → 비활성화
+  // async function triggerZoneReaction(event) { ... }
 
   function handleMouseDown(event) {
     closeMenu();
@@ -275,9 +257,9 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
       }
     }
 
-    if (currentDrag.button === 0 && !currentDrag.moved) {
-      triggerZoneReaction(event);
-    }
+    // if (currentDrag.button === 0 && !currentDrag.moved) {
+    //   triggerZoneReaction(event);
+    // }
   }
 
   async function handleTogglePin() {
