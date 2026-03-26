@@ -2,6 +2,7 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import HierarchyCheckbox from "./HierarchyCheckbox";
 import { OUTPUT_MODES } from "../constants/outputModes";
+import { buildApiUrl } from "../services/api";
 import { previewPersona } from "../services/settings";
 
 const SECTIONS = [
@@ -82,7 +83,7 @@ function Settings({ settingsState }) {
     }));
 
     try {
-      const response = await fetch(`/settings/integrations/${name}/test`, {
+      const response = await fetch(buildApiUrl(`/settings/integrations/${name}/test`), {
         method: "POST"
       });
       const payload = await response.json();
@@ -412,7 +413,8 @@ function Settings({ settingsState }) {
                     <input
                       aria-label={`${name}-key`}
                       type={keyVisibility[name] ? "text" : "password"}
-                      value={keyVisibility[name] ? config.apiKey : maskKey(config.apiKey)}
+                      value={keyVisibility[name] ? config.apiKey : ""}
+                      placeholder={keyVisibility[name] ? "API 키 입력" : maskKey(config.apiKey) || "API 키 미설정"}
                       onChange={(event) =>
                         updatePending("integrations", {
                           [name]: { ...config, apiKey: event.target.value }

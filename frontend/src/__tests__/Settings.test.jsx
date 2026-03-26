@@ -101,9 +101,12 @@ describe("Settings", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "외부 연동" }));
     const input = await screen.findByLabelText("serper-key");
-    expect(input).toHaveValue("sk-1...5678");
+    // Hidden mode: value is empty, masked key shown as placeholder
+    expect(input).toHaveValue("");
+    expect(input).toHaveAttribute("placeholder", "sk-1...5678");
 
     fireEvent.click(screen.getByRole("button", { name: "serper-toggle-visibility" }));
+    // Visible mode: actual key shown as value
     expect(input).toHaveValue("sk-12345678");
   });
 
