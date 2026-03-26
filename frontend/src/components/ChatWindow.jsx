@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import { streamChat } from "../services/chat";
-import { submitFeedback } from "../services/feedback";
+import { deleteConversation, submitFeedback } from "../services/feedback";
 import { OUTPUT_MODES } from "../constants/outputModes";
 import { useOutputMode } from "../hooks/useOutputMode";
 
@@ -196,6 +196,25 @@ function ChatWindow({
                 </button>
               ))}
             </div>
+            {conversationId ? (
+              <button
+                type="button"
+                className="chat-sidebar__delete"
+                onClick={async () => {
+                  try {
+                    await deleteConversation(conversationId);
+                  } catch {
+                    // 삭제 실패해도 로컬 UI는 초기화
+                  }
+                  onNewConversation();
+                  setConversationId(null);
+                  setMessages([]);
+                  setSidebarOpen(false);
+                }}
+              >
+                현재 대화 삭제
+              </button>
+            ) : null}
             <div className="chat-sidebar__history">대화 기록은 다음 단계에서 연결돼.</div>
           </aside>
         </>

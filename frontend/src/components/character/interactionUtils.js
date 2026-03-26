@@ -1,28 +1,9 @@
 export const SNAP = 40;
 
-export const ZONE_REACTIONS = {
-  head: {
-    mood: "HAPPY",
-    emoji: "😊",
-    prompt: "머리 쓰다듬어줬어. 10자 이내로 짧게."
-  },
-  upper: {
-    mood: "CURIOUS",
-    emoji: "👀",
-    prompt: "몸통 건드렸어. 10자 이내로 짧게."
-  },
-  lower: {
-    mood: "IDLE",
-    emoji: "😶",
-    prompt: "다리 건드렸어. 10자 이내로 짧게."
-  }
-};
-
 export const TIPS = [
   "우클릭 드래그로 위치를 옮길 수 있어요",
   "Ctrl+스크롤로 크기를 조절해요",
   "스크롤 버튼 드래그로 화면을 이동해요",
-  "머리를 쓰다듬어 줘도 돼요",
   "우클릭하면 메뉴가 열려요",
   "Alt+H로 채팅/설정 창을 열 수 있어요",
   "설정에서 호칭/말투를 바꿀 수 있어요",

@@ -33,7 +33,7 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 현재 작업 중인 파일: 없음 (소유권 해제)
 마지막 완료: LLM Router + Dual-Call Pipeline + Session Judge + Reaction Engine (2026-03-24)
 블로커: 없음
-다음 작업: dev 머지 후 다음 PROMPT 작업 대기
+다음 작업: Phase 4 MCP / 도구 작업 대기
 ```
 
 **완료된 태스크 (Phase 1):**
@@ -141,6 +141,18 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] backend/tests/test_llm_router_and_pipeline.py: 36개 테스트
 - [x] 기존 테스트 6개 파일 패치 업데이트 (chat_mod → cp_mod, llm_router mock)
 - [x] 전체 테스트 137/137 통과
+
+**완료된 태스크 (Phase 3 마감 — 2026-03-26):**
+- [x] CharacterOverlay.jsx: 캐릭터 터치 반응 제거 (requestReactionBubble, triggerZoneReaction, pettingTracker)
+- [x] interactionUtils.js: ZONE_REACTIONS 제거, TIPS 8→7개 (터치 팁 제거)
+- [x] backend/routers/settings.py: POST /settings/integrations/{name}/test 추가 (api_key body, 실제 API 연결 테스트)
+- [x] backend/routers/chat.py: DELETE /conversations/{id} 추가 (messages+feedback 연쇄 삭제)
+- [x] frontend/src/services/feedback.js: deleteConversation() 추가
+- [x] frontend/src/components/ChatWindow.jsx: 사이드바 "현재 대화 삭제" 버튼 추가
+- [x] frontend/src/components/Settings.jsx: settings-body 스크롤 영역 분리, 통합 테스트 시 api_key body 전송, 성공 시 status "connected" 업데이트
+- [x] frontend/src/styles/app.css: settings-shell/settings-body/settings-actions/accordion CSS 추가
+- [x] API_CONTRACT.md: DELETE /conversations/{id}, POST /settings/integrations/{name}/test 계약 추가
+- [x] 프론트 테스트 49/49 통과, 빌드 통과
 
 **Codex에게 전달할 브리핑:**
 - 능동 알림 주기 제어 API 완료.

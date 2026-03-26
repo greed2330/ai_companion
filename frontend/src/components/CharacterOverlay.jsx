@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import {
   applyGaze,
@@ -7,30 +7,15 @@ import {
   loadCharacterModel
 } from "./characterRenderer";
 import {
-  createPettingTracker,
-  getClickZone,
   getGazeOffset,
-  TIPS,
-  ZONE_REACTIONS
+  TIPS
 } from "./character/interactionUtils";
-import { requestReactionBubble } from "../services/reactions";
 
 function CharacterOverlay({ mood, modelPath = "", modelName = "하나", initialScale = 1 }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);
   const dragRef = useRef(null);
   const prevInitialScaleRef = useRef(initialScale);
-  const pettingTracker = useMemo(
-    () =>
-      createPettingTracker(() => {
-        window.hanaDesktop?.showBubble?.({
-          message: "기분 좋다~",
-          mood: "HAPPY",
-          type: "talk"
-        });
-      }),
-    []
-  );
   const [hasRenderableModel, setHasRenderableModel] = useState(false);
   const [menuState, setMenuState] = useState({ open: false, x: 0, y: 0 });
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: initialScale });
@@ -103,27 +88,6 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나", initialS
     setMenuState((current) => ({ ...current, open: false }));
   }
 
-  async function triggerZoneReaction(event) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const zone = getClickZone(event.clientY - bounds.top, bounds.height);
-    const reaction = ZONE_REACTIONS[zone];
-
-    try {
-      const bubble = await requestReactionBubble(reaction.prompt);
-      window.hanaDesktop?.showBubble?.({
-        message: bubble.message || reaction.emoji,
-        mood: bubble.mood || reaction.mood,
-        type: "talk"
-      });
-    } catch {
-      window.hanaDesktop?.showBubble?.({
-        message: reaction.emoji,
-        mood: reaction.mood,
-        type: "talk"
-      });
-    }
-  }
-
   function handleMouseDown(event) {
     closeMenu();
     if (event.button === 0 || event.button === 1) {
@@ -188,8 +152,6 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나", initialS
   function handleMouseMove(event) {
     const currentDrag = dragRef.current;
     const bounds = event.currentTarget.getBoundingClientRect();
-    const zone = getClickZone(event.clientY - bounds.top, bounds.height);
-    pettingTracker.update({ movementX: event.movementX, zone });
 
     window.hanaDesktop?.getCharacterBounds?.().then((charBounds) => {
       const gaze = getGazeOffset(event.screenX, event.screenY, charBounds || {
@@ -230,9 +192,6 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나", initialS
       return;
     }
     dragRef.current = null;
-    if (currentDrag.button === 0 && !currentDrag.moved) {
-      triggerZoneReaction(event);
-    }
   }
 
   function handleWheel(event) {
@@ -267,7 +226,6 @@ function CharacterOverlay({ mood, modelPath = "", modelName = "하나", initialS
           dragRef.current = null;
           window.hanaDesktop?.notifyCharacterMouse?.(false);
         }
-        pettingTracker.reset();
       }}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -322,5 +280,5 @@ CharacterOverlay.propTypes = {
   modelName: PropTypes.string
 };
 
-export { detectModelType, getClickZone, createPettingTracker };
+export { detectModelType };
 export default CharacterOverlay;
