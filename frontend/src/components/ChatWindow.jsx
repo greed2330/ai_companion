@@ -126,7 +126,7 @@ function ChatWindow({
           await handleResponse(
             assistantContent,
             event.action_type || "",
-            window.__pendingTTSParams || {},
+            { mood: nextMood, ...(window.__pendingTTSParams || {}) },
             (text) => {
               if (!shouldRenderInChat) {
                 setMessages((prev) => [
