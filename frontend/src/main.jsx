@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import App from "./App";
-import "./styles/app.css";
+import "./styles/hana.css";
 
 window.__VITE_API_BASE_URL__ =
   import.meta.env.VITE_API_BASE_URL || "";

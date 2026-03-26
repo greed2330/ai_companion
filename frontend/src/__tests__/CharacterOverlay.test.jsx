@@ -25,6 +25,13 @@ jest.mock("../components/characterRenderer", () => ({
   )
 }));
 
+jest.mock("../services/characterController", () => ({
+  characterController: {
+    detach: jest.fn(),
+    init: jest.fn(() => Promise.resolve())
+  }
+}));
+
 const {
   applyMood,
   loadCharacterModel
@@ -51,6 +58,7 @@ describe("CharacterOverlay", () => {
     const { rerender } = render(
       <CharacterOverlay
         mood="IDLE"
+        modelId="hana"
         modelPath="assets/character/hana/hana.model3.json"
       />
     );
@@ -59,6 +67,7 @@ describe("CharacterOverlay", () => {
     rerender(
       <CharacterOverlay
         mood="HAPPY"
+        modelId="hana"
         modelPath="assets/character/hana/hana.model3.json"
       />
     );

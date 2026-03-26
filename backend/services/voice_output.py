@@ -6,11 +6,12 @@ Kokoro TTS로 텍스트 → WAV 바이트 변환.
 
 import io
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 # Kokoro 기본 목소리: 한국어 여성 목소리
-KOKORO_VOICE: str = "af_heart"  # kokoro 기본 영어 fallback; 한국어 모델 설치 시 변경 가능
+KOKORO_VOICE: str = os.getenv("KOKORO_VOICE", "kf_bella")  # 한국어 여성 목소리
 
 
 async def synthesize(
@@ -42,7 +43,7 @@ async def synthesize(
 
     # KPipeline: lang_code='a' (영어/범용), 'j' (일본어), 'z' (중국어)
     # 한국어 전용 모델이 없으면 'a' 사용. 추후 한국어 모델 지원 시 lang_code 변경.
-    pipeline = KPipeline(lang_code="a")
+    pipeline = KPipeline(lang_code="k")
 
     # speed는 KPipeline의 speed 파라미터로 전달
     wav_chunks = []

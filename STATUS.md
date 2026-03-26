@@ -25,23 +25,56 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 
 ---
 
-## 🔵 Claude Code 상태 (백엔드 전담)
+## 🔵 Claude Code 상태 (백엔드 + 프론트엔드 전담)
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase4.5-tts-stt (완료, PR 대기)
-현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 4.5 TTS/STT 전체 — backend + frontend (2026-03-26)
+현재 작업 브랜치: claude/phase4.5-tts-stt
+마지막 완료: 2026-03-26 버그픽스 세션 — 5개 이슈 해결
 블로커: 없음
-
-다음 작업 (단위별):
-  - [x] Unit 1: backend STT (Whisper) + POST /voice/stt ✅
-  - [x] Unit 2: frontend 마이크 버튼 + STT 연결 ✅
-  - [x] Unit 3: frontend TTS 재생 (응답 후 자동, mood 전달) ✅
-  - [x] Unit 4: 감정 상태 → TTS pitch/speed 연결 검증 ✅ (tts_emotion.py 기존 구현 확인)
-
 ⚠️ 오너 지시 (2026-03-26): Claude Code가 frontend/ 도 담당. Codex 역할 없음.
 ```
+
+**2026-03-26 세션에서 해결한 이슈:**
+- [x] 캐릭터 클릭 → LLM 호출 → conversation 스팸 생성 → triggerZoneReaction 비활성화
+- [x] `POST /settings/autonomous` 404 → 백엔드 라우트 + 서비스 함수 추가
+- [x] 연동 탭 버튼 잘림 → CSS 클래스명 불일치(integration-actions→controls) + flex-wrap 추가
+- [x] 행동 탭 전체 선택 논리 오류 → disabled인 auto_crawl을 allState 계산에서 제외
+- [x] 위치 조정 팝업 기본값/적용 버튼 → popup-footer로 분리, 하단 고정
+
+**🔴 다음 세션에서 해결해야 할 이슈 (우선순위 순):**
+
+### 1. TTS 작동 안 됨 — 의존성 누락
+- `misaki[ko]` 설치됐으나 내부 의존성 `nltk` 없어서 import 실패
+- **오너가 먼저 할 것:** `.venv/bin/pip install nltk` 실행
+- 이후 백엔드 재시작하면 TTS 동작 가능
+- 프론트에서 출력 모드를 "음성"으로 변경해야 TTS 활성화됨 (기본값: 채팅)
+
+### 2. 한국어 응답 품질 저하 — 시스템 프롬프트 빈약
+- `backend/services/llm.py` `_BASE_SYSTEM_PROMPT`에 Good/Bad 예시 추가 필요
+- qwen3는 예시 기반 프롬프트에 잘 반응함
+- think:true 전체 확대는 응답 속도 +5~15초로 비권장
+- think 조건 유지 (코딩/분석만 true), 프롬프트 품질로 개선
+- **모델은 qwen3:14b 권장** (32b는 VRAM 16GB 초과 → CPU offload → 느리고 불안정)
+
+### 3. `/settings/integrations/{key}` 백엔드 없음
+- 연동 탭(Serper API / Google Calendar / GitHub) 키 저장/조회/테스트 엔드포인트 미구현
+- `GET /settings/integrations/{key}` → 현재 키 상태 반환
+- `POST /settings/integrations/{key}` → API 키 저장
+- `POST /settings/integrations/{key}/test` → 연결 테스트
+- settings_service.py에 integrations 섹션 추가, settings.py에 라우트 추가
+
+### 4. think:true 시 chain-of-thought가 응답에 그대로 출력됨
+- qwen3 think 모드는 `<think>...</think>` 블록을 내부적으로 생성함
+- 현재 스트림 파서가 이를 걸러내지 않고 클라이언트에 그대로 전송
+- `backend/services/llm_router.py` 또는 `chat_pipeline.py`의 스트림 파서에서
+  `<think>` 블록 필터링 추가 필요
+
+### 5. Redis 미실행 → Celery 전체 불능 (오너 환경)
+- 매 채팅마다 20초 재시도 로그 폭탄 + CRITICAL
+- 자동 채점, 기억 추출, 세션 요약 전부 동작 안 함
+- **오너가 할 것:** `brew services start redis` 또는 `redis-server` 실행
+- 백엔드가 Redis 없어도 채팅은 동작하도록 설계되어 있으나 부하가 큼
 
 **완료된 태스크 (Phase 1):**
 - [x] FastAPI 서버 구조 (main.py, CORS, lifespan)
@@ -149,7 +182,6 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] 기존 테스트 6개 파일 패치 업데이트 (chat_mod → cp_mod, llm_router mock)
 - [x] 전체 테스트 137/137 통과
 
-
 **완료된 태스크 (Phase 4 Memory System + Experience Self-Formation):**
 - [x] backend/models/experience.py: SensoryData/IntegratedRead/HanaInternal/LearningOutput/Experience dataclasses
 - [x] backend/services/memory_service.py: ChromaDB 멀티-컬렉션 (volatile/longterm/experience/preference/dataset) + 마이그레이션 + decay
@@ -183,11 +215,11 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Codex만 수정합니다.
 
 ```
-현재 작업 브랜치: codex/phase3-ux-c
+현재 작업 브랜치: codex/phase3-ux-d
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 3-C settings tab full implementation 완료. settings accordion + pending/saved state + persona/autonomous/integrations/voice/app settings UI + output mode 처리 + 테스트/빌드 검증 완료 (2026-03-24)
+마지막 완료: Phase 3-D STT + TTS + generative character motion system 완료. STT/TTS/lipsync/characterController/useMotionStream + ChatWindow/CharacterOverlay 연동 + 테스트/빌드 검증 완료 (2026-03-24)
 블로커: 없음
-다음 작업: dev PR 생성 대기. Handoff: "Phase 3 UX complete. /settings/integrations UI done needs PROMPT_06 backend. /settings/autonomous UI done needs PROMPT_04-6B backend. outputModes.js + useOutputMode.js ready for 05-D."
+다음 작업: dev PR 생성 대기. Handoff: "Phase 3-D complete. Generative motion: characterController.js (motion_sequence JSON). STT: sttService. TTS: ttsService. Lipsync: lipSyncService. Needs GET /settings/models/current-context from PROMPT_04-6B."
 ```
 
 **완료된 태스크:**
@@ -460,3 +492,291 @@ Frontend status relevant to this handoff:
 - Live2D renderer path exists and requires local `assets/live2d/live2dcubismcore.min.js`.
 - Chat/settings windows now have custom drag/minimize/maximize-close controls because they are frameless Electron windows.
 - Character model selection is also broadcast locally so the overlay can refresh even when SSE falls back temporarily.
+
+---
+
+## Codex Update - 2026-03-25
+
+Branch: `codex/phase3-ux-d`
+
+- Settings UI was reworked into a product-style layout:
+  - left section navigation
+  - right detail panel
+  - fixed bottom action bar
+  - right-panel-only scrolling
+- MainWindow, ChatWindow, and Settings labels were cleaned up to remove broken text rendering.
+- Character settings now surface current model state and viewport controls more clearly.
+- Frontend validation after the UI rework:
+  - `npm test -- --runInBand` passed
+  - `npm run build` passed
+- Local note:
+  - `frontend/electron/main.js` still contains the uncommitted Electron Store ESM fix required for app startup.
+
+### Owner Feedback / Next Session Priority
+
+The following issues were reported by the owner and should be treated as first-priority follow-up work on the next session.
+
+1. Settings page UX is still below bar.
+- Current layout is neither a clean accordion nor a well-resolved sidebar/detail settings pattern.
+- Information hierarchy is weak, section boundaries are unclear, and the overall screen does not feel product-grade.
+- Sidebar itself is not scrollable.
+- Window size is fixed, which makes dense settings UI harder to use.
+- Button sizing and visual rhythm are too uniform, so the screen does not guide attention well.
+- Text blocks are too raw and uneven, causing section heights and density to feel inconsistent.
+- Next pass should focus on proper UX structure first, not just styling on top of the current layout.
+
+2. Character tip behavior is too frequent / always-on.
+- Tip bubbles should not feel like a 24-hour looping banner.
+- They should appear only occasionally and under explicit timing or situation rules.
+- Next pass should define concrete triggers, cooldowns, and suppression rules before adjusting presentation.
+
+3. Character positioning inside the viewport is not solved.
+- Owner cannot reliably reposition the character within the viewport when it is off-frame or poorly placed.
+- Requested capability: explicit in-viewport position adjustment, not just viewport scale.
+- Next pass should verify whether this capability exists at all; if not, add proper x/y offset controls and renderer application.
+
+## Codex Update - 2026-03-25 (UI mockup pass)
+
+Branch: `codex/phase3-ux-d`
+
+- Rebuilt the desktop shell to match the supplied mockup tone more closely:
+  - compact titlebar
+  - reference-style tab bar
+  - darker panel system with violet accent
+- Reworked `ChatWindow` into a web AI chat layout:
+  - left room rail
+  - feed-first message area
+  - starter prompt cards
+  - cleaner composer and feedback chips
+- Reworked `Settings` into a sidebar/detail layout based on the HTML reference:
+  - section navigation
+  - hero/model panel
+  - local character position preview with snap points and x/y sliders
+  - integration status cards
+- Validation:
+  - `npm test -- --runInBand` passed
+  - `npm run build` passed
+
+## Codex Update - 2026-03-25 (reference parity + viewport wiring)
+
+Branch: `codex/phase3-ux-d`
+
+- Fixed a real mismatch with the provided 420px mockup:
+  - the previous responsive breakpoint hid the left settings/chat sidebars at the exact mockup width
+  - the sidebar collapse breakpoint is now reduced so the reference two-column layout remains visible at the intended desktop width
+- Character viewport controls are now actually wired instead of preview-only:
+  - `positionX`, `positionY`, `viewportScale`, and `opacity` are stored in app settings
+  - the settings panel edits those values directly
+  - the character overlay reads them on load and updates live through the shared `hana-overlay` broadcast channel
+- Main window chrome was corrected for actual desktop use:
+  - resize is enabled
+  - maximize toggle button added to the titlebar
+- Validation:
+  - `npm test -- --runInBand` passed
+  - `npm run build` passed
+- Remaining gap:
+  - character x/y controls are preview-only in the settings UI and are not yet wired into the renderer/app persistence layer
+
+## Codex Update - 2026-03-25 (runtime fix pass)
+
+Branch: `codex/phase3-ux-d`
+
+- Corrected the runtime issues reported after the mockup pass:
+  - Ollama `400` now retries once without the `think` flag in [`backend/services/llm.py`](/E:/Projects/hana_project/hana_codex/backend/services/llm.py)
+  - main Electron window is resizable again with minimum size constraints in [`frontend/electron/main.js`](/E:/Projects/hana_project/hana_codex/frontend/electron/main.js)
+  - scroll containers were fixed for the chat rail, settings sidebar, drawer, and content panes in [`frontend/src/styles/app.css`](/E:/Projects/hana_project/hana_codex/frontend/src/styles/app.css)
+- Re-aligned the UI closer to the provided HTML reference instead of the earlier condensed reinterpretation:
+  - chat shell rebuilt around the reference left rail + feed layout in [`frontend/src/components/ChatWindow.jsx`](/E:/Projects/hana_project/hana_codex/frontend/src/components/ChatWindow.jsx)
+  - settings panel rebuilt around reference-style sections and rows in [`frontend/src/components/Settings.jsx`](/E:/Projects/hana_project/hana_codex/frontend/src/components/Settings.jsx)
+- Character model visibility was made more explicit:
+  - detected model count is shown
+  - empty state is shown if no character models are found
+  - current model/type are surfaced directly in the character panel
+- Validation:
+  - `npm test -- --runInBand` passed
+  - `npm run build` passed
+
+## Codex Update - 2026-03-25 (Phase 3-E complete) 🟡
+
+Branch: `codex/phase3-ux-d`
+
+- Completed Phase 3-E full main-window UI rewrite from the supplied reference mockup.
+- Rewrote the main desktop shell into the new frameless `MainWindow` structure:
+  - titlebar
+  - tab bar
+  - preserved tab state between chat/settings
+- Rebuilt the chat tab around the reference layout:
+  - conversation list with `GET /conversations`
+  - grouped history sidebar
+  - history loading with `GET /history`
+  - SSE streaming chat flow via `POST /chat`
+  - `room_change` event handling
+  - assistant feedback buttons
+- Rebuilt the settings tab around the reference layout:
+  - 6-panel sidebar navigation
+  - pending/saved state pattern
+  - save / cancel / reset flow
+  - immediate character model selection
+  - immediate LLM model selection
+  - voice output mode wired to `outputModes.js`
+- Added character position popup as a separate BrowserWindow:
+  - popup route
+  - IPC wiring
+  - position/size apply flow
+- Updated Electron main window behavior to match Phase 3-E requirements:
+  - `frame: false`
+  - `resizable: true`
+  - persisted main window position and size via `electron-store`
+  - min/max width constraints
+- Validation:
+  - `npm test -- --runInBand` passed
+  - `npm run build` passed
+- Release file ownership:
+  - no files currently locked by Codex
+- Handoff note:
+  - "Phase 3-E complete. Full UI rewrite based on reference mockup.
+    Chat tab: conversation list (GET /conversations), history loading (GET /history),
+    SSE streaming, room_change events, feedback buttons.
+    Settings tab: all 6 panels, pending state pattern, immediate model selection,
+    character position popup (separate BrowserWindow).
+    outputModes.js connected to VoicePanel.
+    Ready for PROMPT_06 (memory system backend)."
+
+## Codex Update - 2026-03-26 (05-D in progress, do not treat as complete) 🟡
+
+Branch: `codex/phase3-ux-d`
+
+Current status:
+- Phase `05-D` is still in progress.
+- Character positioning is partially improved, but not finished.
+- Do not mark the character positioning / settings stability work as complete yet.
+
+What was fixed in this pass:
+- Separated `window placement` from `in-viewport character framing`.
+  - Popup `X/Y` is now intended to control only the visible framing of the character model.
+  - Character window screen position is persisted only through overlay drag, not popup apply.
+- Fixed popup lifecycle.
+  - Popup was previously being hidden instead of truly closed, so reopening reused stale state.
+  - The popup now closes and rehydrates its state when reopened.
+- Fixed false size inference in the popup.
+  - Popup was inferring size preset from current window width.
+  - That caused `Apply` to trigger unintended size/placement correction even when the user changed nothing.
+  - Popup now reads the persisted `charPosition.size` value directly from Electron instead.
+- Removed duplicate opacity behavior that made characters look washed out.
+  - Default opacity was raised to `100`.
+  - DOM opacity layering was removed from the overlay path so opacity is not visually double-applied.
+- Removed hidden in-overlay framing controls that were fighting the popup.
+  - Middle-button viewport shifting and wheel-based scaling were removed from the overlay.
+  - Popup is now the intended UI for character framing.
+- Split PMX framing logic away from Live2D logic.
+  - Live2D remains on the simpler 2D offset path.
+  - PMX now uses a separate framing calculation with its own focus point and fit distance.
+
+Critical bug found and fixed:
+- PMX position changes were visibly applying for only one frame, then snapping back.
+- Root cause:
+  - [`frontend/src/services/characterController.js`](/E:/Projects/hana_project/hana_codex/frontend/src/services/characterController.js)
+    was still driving `renderer.model.position.y` during idle breathing for PMX models.
+  - That silently overwrote the framing offset computed by
+    [`frontend/src/components/characterRenderer.js`](/E:/Projects/hana_project/hana_codex/frontend/src/components/characterRenderer.js).
+- Fix:
+  - Disabled the direct PMX `position.y` overwrite in `CharacterController` for `__bodyY`.
+  - PMX framing is now owned by `characterRenderer.js`, not by the motion controller.
+
+Problems discovered during this pass:
+- Multiple sources of truth existed for character placement:
+  - `store.charPosition`
+  - `appSettings.character.positionX/Y`
+  - temporary popup state
+  - runtime renderer state
+- Popup state, window placement, and renderer state were mixed together.
+- PMX and Live2D were incorrectly treated as if they could share the same framing math.
+- Old settings paths and newer settings paths both touched character-related state, increasing regression risk.
+
+Open issues for the next session:
+- Character size slider still expands correctly but does not reliably shrink back down.
+- Some toggle controls in Settings still do not actually work.
+- PMX framing is improved but still needs more tuning and validation across real models.
+- Need to verify that no legacy settings component path is still writing stale character state.
+- Need to audit all character-related state writes so no hidden path reverts framing values again.
+
+Files most relevant to continue from:
+- [`frontend/src/components/characterRenderer.js`](/E:/Projects/hana_project/hana_codex/frontend/src/components/characterRenderer.js)
+- [`frontend/src/components/CharacterOverlay.jsx`](/E:/Projects/hana_project/hana_codex/frontend/src/components/CharacterOverlay.jsx)
+- [`frontend/src/components/settings/CharacterPositionPopup.jsx`](/E:/Projects/hana_project/hana_codex/frontend/src/components/settings/CharacterPositionPopup.jsx)
+- [`frontend/src/services/characterController.js`](/E:/Projects/hana_project/hana_codex/frontend/src/services/characterController.js)
+- [`frontend/src/hooks/useSettings.js`](/E:/Projects/hana_project/hana_codex/frontend/src/hooks/useSettings.js)
+- [`frontend/electron/main.js`](/E:/Projects/hana_project/hana_codex/frontend/electron/main.js)
+- [`frontend/electron/preload.js`](/E:/Projects/hana_project/hana_codex/frontend/electron/preload.js)
+
+Validation completed in this pass:
+- `npm test -- --runInBand` passed
+- `npm run build` passed
+
+Release file ownership:
+- No files are intentionally locked by Codex, but `05-D` is ongoing and should resume from the files listed above.
+
+## Codex Update - 2026-03-26 (05-D viewport drag blocked, unresolved) 🟡
+
+Branch: `codex/phase3-ux-d`
+
+Current owner-reported blocker:
+- Right-click drag for moving the character window still does not work reliably.
+- Expected behavior:
+  - hold right mouse button on the character
+  - drag like a normal Windows window move
+  - release to place the character window
+- Actual behavior:
+  - drag does not start or immediately breaks
+  - previous attempts to fix it did not restore stable movement
+
+What was attempted in this session:
+- Preserved the original product rule:
+  - popup = character framing
+  - right-click drag = character window movement
+- Reverted a wrong detour where popup `X/Y` was temporarily repurposed to move the window itself.
+- Tried to stop drag cancellation caused by renderer `mouseleave`.
+- Tried to stop drag cancellation caused by re-enabling click-through during drag.
+- Added a temporary drag start/end path in Electron:
+  - during right-drag start: disable `ignoreMouseEvents`, enable focus
+  - during drag end: restore click-through
+
+Why this is still unresolved:
+- The current drag architecture is still not equivalent to native Windows window dragging.
+- The overlay window is created as:
+  - frameless
+  - `focusable: false`
+  - `setIgnoreMouseEvents(true, { forward: true })`
+- Dragging is currently simulated by renderer mouse deltas over IPC:
+  - renderer sends `character:move-by`
+  - main process moves window manually
+- This means drag stability depends on hover state, focusability, click-through timing, and renderer event continuity.
+- In practice, that path is still fragile and is not behaving like a real OS window move.
+
+Important mistakes to avoid repeating:
+- Do not redefine popup semantics again.
+  - popup controls in-viewport character framing, not screen placement
+- Do not mix these three concerns:
+  - character framing
+  - viewport/window size
+  - viewport/window placement
+- Do not assume `mouseleave` handling alone fixes drag.
+- Do not assume PMX framing changes are related to this bug.
+  - owner explicitly separated PMX/framing from viewport drag
+
+Most likely next fix direction:
+- Replace the current renderer-delta drag simulation with a more native main-process drag strategy.
+- Candidate directions to evaluate:
+  - dedicated drag mode in main process using cursor screen position polling
+  - or another Electron-supported frameless drag approach that does not depend on continuous renderer hover events
+- Keep right-click drag as the interaction.
+- Keep popup behavior unchanged.
+
+Files directly involved:
+- [`frontend/src/components/CharacterOverlay.jsx`](/E:/Projects/hana_project/hana_codex/frontend/src/components/CharacterOverlay.jsx)
+- [`frontend/electron/main.js`](/E:/Projects/hana_project/hana_codex/frontend/electron/main.js)
+- [`frontend/electron/preload.js`](/E:/Projects/hana_project/hana_codex/frontend/electron/preload.js)
+
+State of this blocker at handoff:
+- unresolved
+- do not mark viewport/window drag as complete
