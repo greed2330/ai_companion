@@ -29,11 +29,17 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase4-memory-experience (커밋 완료, PR 대기)
-현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 4 Memory System + Experience Self-Formation Pipeline (2026-03-26)
+현재 작업 브랜치: claude/phase4.5-tts-stt (진행 중)
+현재 작업 중인 파일: frontend/src/services/voice.js, frontend/src/components/ChatWindow.jsx
+마지막 완료: Unit 1 backend STT/TTS endpoints — voice_input.py, voice_output.py, routers/voice.py (2026-03-26)
 블로커: 없음
-다음 작업: dev 머지 후 다음 PROMPT 작업 대기
+다음 작업 (단위별):
+  - [x] Unit 1: backend STT (Whisper) + POST /voice/stt ✅
+  - [ ] Unit 2: frontend 마이크 버튼 + STT 연결 (진행 중)
+  - [ ] Unit 3: frontend TTS 재생 (응답 후 자동)
+  - [ ] Unit 4: 감정 상태 → TTS pitch/speed 연결 검증
+
+⚠️ 오너 지시 (2026-03-26): Claude Code가 frontend/ 도 담당. Codex 역할 없음.
 ```
 
 **완료된 태스크 (Phase 1):**

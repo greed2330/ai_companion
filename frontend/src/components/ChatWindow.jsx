@@ -4,6 +4,7 @@ import { streamChat } from "../services/chat";
 import { submitFeedback } from "../services/feedback";
 import { OUTPUT_MODES } from "../constants/outputModes";
 import { useOutputMode } from "../hooks/useOutputMode";
+import { startRecording, transcribeBlob, speak } from "../services/voice";
 
 const ROOM_CONFIG = {
   general: { label: "일반 대화", icon: "🗨", interactionType: "general" },
@@ -30,8 +31,11 @@ function ChatWindow({
   const [error, setError] = useState("");
   const [feedbackState, setFeedbackState] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const recorderRef = useRef(null);
   const endRef = useRef(null);
-  const { handleResponse } = useOutputMode(settings);
+  const ttsService = { speak };
+  const { handleResponse } = useOutputMode(settings, { ttsService });
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -144,6 +148,32 @@ function ChatWindow({
       setError(streamError.message);
     } finally {
       setIsStreaming(false);
+    }
+  }
+
+  async function handleMicToggle() {
+    if (isRecording) {
+      recorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    setError("");
+    try {
+      const { stop, blobPromise } = await startRecording();
+      recorderRef.current = { stop };
+      setIsRecording(true);
+
+      const blob = await blobPromise;
+      setIsRecording(false);
+
+      const result = await transcribeBlob(blob);
+      if (result.text) {
+        setInput(result.text);
+      }
+    } catch (micError) {
+      setIsRecording(false);
+      setError(micError.message);
     }
   }
 
@@ -260,14 +290,18 @@ function ChatWindow({
           onKeyDown={handleKeyDown}
           disabled={isStreaming}
         />
-        <button
-          disabled
-          title="음성 입력 (Phase 4.5)"
-          type="button"
-          style={{ cursor: "not-allowed", opacity: 0.4 }}
-        >
-          🎙
-        </button>
+        {settings.inputMode !== "text" ? (
+          <button
+            type="button"
+            aria-label="mic-toggle"
+            title={isRecording ? "녹음 중지" : "음성 입력 시작"}
+            onClick={handleMicToggle}
+            disabled={isStreaming}
+            style={{ opacity: isRecording ? 1 : 0.85 }}
+          >
+            {isRecording ? "⏹" : "🎙"}
+          </button>
+        ) : null}
         <button type="button" onClick={submitMessage} disabled={isStreaming}>
           전송
         </button>
