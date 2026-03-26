@@ -134,6 +134,11 @@ export default function useSettings() {
 
     setSaved(next);
     setPending(null);
+
+    // Apply viewport changes immediately after save
+    window.hanaDesktop?.charViewportSize?.(next.viewportSize);
+    window.hanaDesktop?.charViewportOpacity?.(next.viewportOpacity);
+
     try {
       const channel = new BroadcastChannel("hana-overlay");
       channel.postMessage({

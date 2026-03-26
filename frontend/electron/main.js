@@ -452,22 +452,18 @@ function moveCharacterWindowBy(deltaX, deltaY) {
 
   const bounds = characterWindow.getBounds();
   const display = getCharacterDisplay();
-  const next = snapToEdge(
-    bounds.x + deltaX,
-    bounds.y + deltaY,
-    bounds.width,
-    bounds.height,
-    display.workAreaSize.width,
-    display.workAreaSize.height
+  // Clamp to work area without snapping — snap happens only on drag end
+  const nextX = Math.max(
+    display.workArea.x,
+    Math.min(display.workArea.x + display.workArea.width - bounds.width, bounds.x + deltaX)
+  );
+  const nextY = Math.max(
+    display.workArea.y,
+    Math.min(display.workArea.y + display.workArea.height - bounds.height, bounds.y + deltaY)
   );
 
-  characterWindow.setPosition(Math.round(next.x), Math.round(next.y));
-  persistCharacterWindowPlacement({
-    ...bounds,
-    x: Math.round(next.x),
-    y: Math.round(next.y)
-  });
-  return { ...bounds, ...next };
+  characterWindow.setPosition(Math.round(nextX), Math.round(nextY));
+  return { ...bounds, x: Math.round(nextX), y: Math.round(nextY) };
 }
 
 function finishCharacterDrag() {

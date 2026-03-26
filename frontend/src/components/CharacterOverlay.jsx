@@ -109,6 +109,19 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
     });
   }, []);
 
+  // Catch mouseup outside the overlay window to reliably end right-click drag
+  useEffect(() => {
+    function onDocumentMouseUp(event) {
+      if (event.button === 2 && dragRef.current?.button === 2) {
+        dragRef.current = null;
+        window.hanaDesktop?.finishCharacterDrag?.();
+        window.hanaDesktop?.endCharacterDrag?.();
+      }
+    }
+    document.addEventListener("mouseup", onDocumentMouseUp);
+    return () => document.removeEventListener("mouseup", onDocumentMouseUp);
+  }, []);
+
   useEffect(() => {
     async function loadViewportSettings() {
       const appSettings = await window.hanaDesktop?.getAppSettings?.();
@@ -283,6 +296,7 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
       onMouseEnter={() => window.hanaDesktop?.notifyCharacterMouse?.(true)}
       onMouseLeave={() => {
         if (dragRef.current?.button === 2) {
+          // Keep mouse events active so right-click drag continues outside the window
           return;
         }
         dragRef.current = null;

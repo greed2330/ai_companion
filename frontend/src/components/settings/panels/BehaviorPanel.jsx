@@ -11,6 +11,8 @@ function BehaviorPanel({ settings }) {
   const allState = useMemo(() => {
     const values = [
       current.autonomous.proactive_chat,
+      current.autonomous.tip_bubbles,
+      current.autonomous.schedule_reminder,
       current.autonomous.auto_crawl,
     ];
 
@@ -21,13 +23,20 @@ function BehaviorPanel({ settings }) {
       return "indeterminate";
     }
     return "unchecked";
-  }, [current.autonomous.auto_crawl, current.autonomous.proactive_chat]);
+  }, [
+    current.autonomous.auto_crawl,
+    current.autonomous.proactive_chat,
+    current.autonomous.tip_bubbles,
+    current.autonomous.schedule_reminder,
+  ]);
 
   function handleAllChange(nextState) {
     const enabled = nextState === "checked";
     updatePending("autonomous", {
       ...current.autonomous,
       proactive_chat: enabled,
+      tip_bubbles: enabled,
+      schedule_reminder: enabled,
       auto_crawl: enabled && serperConnected,
     });
   }
@@ -44,6 +53,26 @@ function BehaviorPanel({ settings }) {
               updatePending("autonomous", {
                 ...current.autonomous,
                 proactive_chat: value === "checked",
+              })
+            }
+          />
+          <HierarchyCheckbox
+            label="팁 말풍선"
+            checked={current.autonomous.tip_bubbles ? "checked" : "unchecked"}
+            onChange={(value) =>
+              updatePending("autonomous", {
+                ...current.autonomous,
+                tip_bubbles: value === "checked",
+              })
+            }
+          />
+          <HierarchyCheckbox
+            label="일정 리마인더"
+            checked={current.autonomous.schedule_reminder ? "checked" : "unchecked"}
+            onChange={(value) =>
+              updatePending("autonomous", {
+                ...current.autonomous,
+                schedule_reminder: value === "checked",
               })
             }
           />

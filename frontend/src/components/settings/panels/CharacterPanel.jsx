@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import PropTypes from "prop-types";
 import Toggle from "../../common/Toggle";
 import HanaSlider from "../../common/HanaSlider";
@@ -7,11 +6,6 @@ function CharacterPanel({ settings }) {
   const { current, currentModelId, models, selectCharacterModel, updatePending } = settings;
   const viewportSize = current.viewportSize ?? 100;
   const viewportOpacity = current.viewportOpacity ?? 85;
-
-  useEffect(() => {
-    window.hanaDesktop?.charViewportSize?.(viewportSize);
-    window.hanaDesktop?.charViewportOpacity?.(viewportOpacity);
-  }, [viewportOpacity, viewportSize]);
 
   return (
     <>
