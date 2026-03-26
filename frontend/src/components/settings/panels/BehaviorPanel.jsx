@@ -8,12 +8,12 @@ function BehaviorPanel({ settings }) {
   const [searchLimit, setSearchLimit] = useState(10);
   const serperConnected = false;
 
+  // auto_crawl은 serperConnected=false일 때 영구 disabled → 전체 선택 계산에서 제외
   const allState = useMemo(() => {
     const values = [
       current.autonomous.proactive_chat,
       current.autonomous.tip_bubbles,
       current.autonomous.schedule_reminder,
-      current.autonomous.auto_crawl,
     ];
 
     if (values.every(Boolean)) {
@@ -24,7 +24,6 @@ function BehaviorPanel({ settings }) {
     }
     return "unchecked";
   }, [
-    current.autonomous.auto_crawl,
     current.autonomous.proactive_chat,
     current.autonomous.tip_bubbles,
     current.autonomous.schedule_reminder,
