@@ -25,22 +25,56 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 
 ---
 
-## 🔵 Claude Code 상태 (백엔드 전담)
+## 🔵 Claude Code 상태 (백엔드 + 프론트엔드 전담)
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: claude/phase4.5-tts-stt (완료, PR 대기)
-현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 4.5 TTS/STT 전체 — backend + frontend (2026-03-26)
+현재 작업 브랜치: claude/phase4.5-tts-stt
+마지막 완료: 2026-03-26 버그픽스 세션 — 5개 이슈 해결
 블로커: 없음
-다음 작업 (단위별):
-  - [x] Unit 1: backend STT (Whisper) + POST /voice/stt ✅
-  - [x] Unit 2: frontend 마이크 버튼 + STT 연결 ✅
-  - [x] Unit 3: frontend TTS 재생 (응답 후 자동, mood 전달) ✅
-  - [x] Unit 4: 감정 상태 → TTS pitch/speed 연결 검증 ✅ (tts_emotion.py 기존 구현 확인)
-
 ⚠️ 오너 지시 (2026-03-26): Claude Code가 frontend/ 도 담당. Codex 역할 없음.
 ```
+
+**2026-03-26 세션에서 해결한 이슈:**
+- [x] 캐릭터 클릭 → LLM 호출 → conversation 스팸 생성 → triggerZoneReaction 비활성화
+- [x] `POST /settings/autonomous` 404 → 백엔드 라우트 + 서비스 함수 추가
+- [x] 연동 탭 버튼 잘림 → CSS 클래스명 불일치(integration-actions→controls) + flex-wrap 추가
+- [x] 행동 탭 전체 선택 논리 오류 → disabled인 auto_crawl을 allState 계산에서 제외
+- [x] 위치 조정 팝업 기본값/적용 버튼 → popup-footer로 분리, 하단 고정
+
+**🔴 다음 세션에서 해결해야 할 이슈 (우선순위 순):**
+
+### 1. TTS 작동 안 됨 — 의존성 누락
+- `misaki[ko]` 설치됐으나 내부 의존성 `nltk` 없어서 import 실패
+- **오너가 먼저 할 것:** `.venv/bin/pip install nltk` 실행
+- 이후 백엔드 재시작하면 TTS 동작 가능
+- 프론트에서 출력 모드를 "음성"으로 변경해야 TTS 활성화됨 (기본값: 채팅)
+
+### 2. 한국어 응답 품질 저하 — 시스템 프롬프트 빈약
+- `backend/services/llm.py` `_BASE_SYSTEM_PROMPT`에 Good/Bad 예시 추가 필요
+- qwen3는 예시 기반 프롬프트에 잘 반응함
+- think:true 전체 확대는 응답 속도 +5~15초로 비권장
+- think 조건 유지 (코딩/분석만 true), 프롬프트 품질로 개선
+- **모델은 qwen3:14b 권장** (32b는 VRAM 16GB 초과 → CPU offload → 느리고 불안정)
+
+### 3. `/settings/integrations/{key}` 백엔드 없음
+- 연동 탭(Serper API / Google Calendar / GitHub) 키 저장/조회/테스트 엔드포인트 미구현
+- `GET /settings/integrations/{key}` → 현재 키 상태 반환
+- `POST /settings/integrations/{key}` → API 키 저장
+- `POST /settings/integrations/{key}/test` → 연결 테스트
+- settings_service.py에 integrations 섹션 추가, settings.py에 라우트 추가
+
+### 4. think:true 시 chain-of-thought가 응답에 그대로 출력됨
+- qwen3 think 모드는 `<think>...</think>` 블록을 내부적으로 생성함
+- 현재 스트림 파서가 이를 걸러내지 않고 클라이언트에 그대로 전송
+- `backend/services/llm_router.py` 또는 `chat_pipeline.py`의 스트림 파서에서
+  `<think>` 블록 필터링 추가 필요
+
+### 5. Redis 미실행 → Celery 전체 불능 (오너 환경)
+- 매 채팅마다 20초 재시도 로그 폭탄 + CRITICAL
+- 자동 채점, 기억 추출, 세션 요약 전부 동작 안 함
+- **오너가 할 것:** `brew services start redis` 또는 `redis-server` 실행
+- 백엔드가 Redis 없어도 채팅은 동작하도록 설계되어 있으나 부하가 큼
 
 **완료된 태스크 (Phase 1):**
 - [x] FastAPI 서버 구조 (main.py, CORS, lifespan)
