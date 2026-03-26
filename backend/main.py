@@ -43,6 +43,14 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("DB initialized")
     load_cached_context()
+    # ChromaDB 레거시 컬렉션 마이그레이션 (기존 hana_memory → hana_memory_longterm)
+    try:
+        from backend.services.memory_service import migrate_legacy_collection
+        migrated = migrate_legacy_collection()
+        if migrated:
+            logger.info("Legacy memory migrated: count=%d", migrated)
+    except Exception as e:
+        logger.warning("Legacy memory migration skipped: %s", e)
     yield
     logger.info("HANA backend shutting down")
 

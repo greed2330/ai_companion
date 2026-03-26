@@ -69,6 +69,19 @@ class LLMRouter:
         except Exception:
             return {}
 
+    async def call_for_text(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+    ) -> str:
+        """단순 텍스트 완성 — 스트리밍 없이 전체 응답 문자열 반환."""
+        if self.source == "protocol":
+            return ""
+        full = ""
+        async for t in self.stream(messages, system_prompt, use_think=False):
+            full += t
+        return full.strip()
+
     async def call_protocol_full(
         self,
         messages: list[dict],
