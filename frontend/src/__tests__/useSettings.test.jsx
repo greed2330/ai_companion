@@ -59,19 +59,22 @@ describe("useSettings", () => {
     );
   });
 
-  test("cancel rolls theme back to saved value", async () => {
+  test("theme change is pending until confirm, cancel reverts effective value", async () => {
     const { result } = renderHook(() => useSettings());
     await waitFor(() => expect(result.current.saved).not.toBeNull());
 
     act(() => {
       result.current.handleThemeChange("glass");
     });
-    expect(document.body.className).toBe("theme-glass");
+    // pending updated but NOT yet applied to DOM
+    expect(result.current.effective.app.theme).toBe("glass");
+    expect(document.body.className).toBe("theme-dark-anime");
 
     act(() => {
       result.current.handleCancel();
     });
-    expect(document.body.className).toBe("theme-dark-anime");
+    // pending cleared — effective reverts to saved
+    expect(result.current.effective.app.theme).toBe("dark-anime");
   });
 
   test("reset applies default settings", async () => {

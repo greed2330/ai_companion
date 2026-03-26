@@ -30,7 +30,7 @@ describe("character interaction utils", () => {
   });
 
   test("tip rotation uses 5 second cadence", () => {
-    expect(TIPS).toHaveLength(8);
+    expect(TIPS).toHaveLength(7);
   });
 
   test("snap corner to screen edge", () => {

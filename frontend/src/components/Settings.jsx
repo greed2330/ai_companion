@@ -2,6 +2,7 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import HierarchyCheckbox from "./HierarchyCheckbox";
 import { OUTPUT_MODES } from "../constants/outputModes";
+import { buildApiUrl } from "../services/api";
 import { previewPersona } from "../services/settings";
 
 const SECTIONS = [
@@ -75,26 +76,32 @@ function Settings({ settingsState }) {
     updatePending("autonomous", next);
   }
 
-  async function testIntegration(name) {
+  async function testIntegration(name, apiKey) {
     setIntegrationUi((current) => ({
       ...current,
       [name]: { state: "loading", message: "확인 중..." }
     }));
 
     try {
-      const response = await fetch(`/settings/integrations/${name}/test`, {
-        method: "POST"
+      const response = await fetch(buildApiUrl(`/settings/integrations/${name}/test`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey })
       });
       const payload = await response.json();
+      const succeeded = payload.success === true;
       setIntegrationUi((current) => ({
         ...current,
         [name]: {
-          state: payload.success ? "success" : "fail",
-          message: payload.success
+          state: succeeded ? "success" : "fail",
+          message: succeeded
             ? `연결됨 (${payload.response_ms}ms)`
             : `실패 - ${payload.error}`
         }
       }));
+      if (succeeded) {
+        updatePending("integrations", { [name]: { apiKey, status: "connected" } });
+      }
     } catch {
       setIntegrationUi((current) => ({
         ...current,
@@ -126,7 +133,8 @@ function Settings({ settingsState }) {
 
   return (
     <section className="settings-shell" data-testid="settings-panel">
-      <h2>설정</h2>
+      <h2 className="settings-shell__title">설정</h2>
+      <div className="settings-body">
       {SECTIONS.map((section) => (
         <section key={section.id} className="accordion">
           <button
@@ -412,7 +420,8 @@ function Settings({ settingsState }) {
                     <input
                       aria-label={`${name}-key`}
                       type={keyVisibility[name] ? "text" : "password"}
-                      value={keyVisibility[name] ? config.apiKey : maskKey(config.apiKey)}
+                      value={keyVisibility[name] ? config.apiKey : ""}
+                      placeholder={keyVisibility[name] ? "API 키 입력" : maskKey(config.apiKey) || "API 키 미설정"}
                       onChange={(event) =>
                         updatePending("integrations", {
                           [name]: { ...config, apiKey: event.target.value }
@@ -431,7 +440,7 @@ function Settings({ settingsState }) {
                     >
                       👁
                     </button>
-                    <button type="button" onClick={() => testIntegration(name)}>
+                    <button type="button" onClick={() => testIntegration(name, config.apiKey)}>
                       연결
                     </button>
                     <span>{integrationUi[name]?.message || config.note || config.status}</span>
@@ -536,6 +545,7 @@ function Settings({ settingsState }) {
       ))}
 
       {error ? <p role="alert">{error}</p> : null}
+      </div>
 
       <div className="settings-actions">
         <button type="button" onClick={handleConfirm}>

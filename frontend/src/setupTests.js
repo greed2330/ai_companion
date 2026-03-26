@@ -33,10 +33,12 @@ if (!global.BroadcastChannel) {
 window.__VITE_API_BASE_URL__ = "http://test";
 window.hanaDesktop = {
   closeWindow: jest.fn(),
+  endCharacterDrag: jest.fn(),
   finishCharacterDrag: jest.fn(() => Promise.resolve()),
   getAppSettings: jest.fn(() =>
     Promise.resolve({
       app: { theme: "dark-anime", shortcut: "Alt+H", autoLaunch: false },
+      character: { viewportScale: 100 },
       integrations: {
         serper: { status: "grey", apiKey: "" },
         google_calendar: { status: "grey", apiKey: "" },
@@ -52,6 +54,7 @@ window.hanaDesktop = {
   hideBubble: jest.fn(),
   minimizeWindow: jest.fn(),
   moveCharacterBy: jest.fn(() => Promise.resolve()),
+  startCharacterDrag: jest.fn(),
   notifyAiNameChanged: jest.fn(),
   notifyCharacterMouse: jest.fn(),
   onBubbleData: jest.fn(() => () => {}),

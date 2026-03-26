@@ -21,6 +21,9 @@ const DEFAULT_APP_SETTINGS = {
     shortcut: DEFAULT_SHORTCUT,
     autoLaunch: false
   },
+  character: {
+    viewportScale: 100
+  },
   integrations: {
     serper: { status: "grey", apiKey: "" },
     google_calendar: { status: "grey", apiKey: "", note: "credentials.json 필요" },
@@ -52,6 +55,7 @@ let mainWindow = null;
 let tray = null;
 let ipcRegistered = false;
 let shortcutsRegistered = false;
+let characterDragActive = false;
 
 function getRendererEntry(route) {
   if (!app.isPackaged) {
@@ -439,6 +443,16 @@ function registerIpcHandlers() {
     characterWindow?.setIgnoreMouseEvents(false);
   });
   ipcMain.on("char-mouse-leave", () => {
+    // Ignore leave events while a window-drag is in progress
+    if (!characterDragActive) {
+      characterWindow?.setIgnoreMouseEvents(true, { forward: true });
+    }
+  });
+  ipcMain.on("char-drag-start", () => {
+    characterDragActive = true;
+  });
+  ipcMain.on("char-drag-end", () => {
+    characterDragActive = false;
     characterWindow?.setIgnoreMouseEvents(true, { forward: true });
   });
   ipcMain.on("show-bubble", (_event, payload) => {

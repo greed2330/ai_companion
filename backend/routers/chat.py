@@ -2,10 +2,11 @@
 대화 라우터 (thin wrapper).
 비즈니스 로직은 services/chat_pipeline.py에 있다.
 
-POST /chat        — SSE 스트리밍 대화
-GET  /history     — 대화 메시지 목록
-GET  /conversations — 세션 목록
-POST /feedback    — 피드백 전송
+POST   /chat              — SSE 스트리밍 대화
+GET    /history           — 대화 메시지 목록
+GET    /conversations     — 세션 목록
+DELETE /conversations/{id} — 대화 삭제
+POST   /feedback          — 피드백 전송
 """
 
 import logging
@@ -109,6 +110,35 @@ async def conversations(limit: int = 20) -> dict:
         for r in rows
     ]
     return {"conversations": result}
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str) -> dict:
+    """대화와 관련 메시지, 피드백 레코드를 모두 삭제한다."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # 먼저 해당 conversation 존재 여부 확인
+        async with db.execute(
+            "SELECT id FROM conversations WHERE id = ?", (conversation_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": True, "code": "NOT_FOUND", "message": "대화를 찾을 수 없어."},
+            )
+
+        # feedback → messages → conversation 순으로 삭제 (FK 참조 순서)
+        await db.execute(
+            "DELETE FROM feedback WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)",
+            (conversation_id,),
+        )
+        await db.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+        await db.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        await db.commit()
+
+    logger.info(f"DELETE /conversations/{conversation_id}: deleted")
+    return {"success": True}
 
 
 @router.post("/feedback")

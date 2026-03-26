@@ -115,6 +115,20 @@ GET /conversations?limit=20
 
 ---
 
+**DELETE /conversations/{id}** — 대화 삭제
+
+응답:
+```json
+{"success": true}
+```
+
+에러 (존재하지 않는 conversation_id):
+```json
+{"error": true, "code": "NOT_FOUND", "message": "대화를 찾을 수 없어."}
+```
+
+---
+
 **POST /feedback** — 피드백 전송
 
 요청:
@@ -372,6 +386,29 @@ audio: <wav 파일>
 ```
 
 변경 즉시 `data/autonomous.json` 저장. Celery 태스크들이 이 파일을 읽어 동작 여부 판단.
+
+---
+
+**POST /settings/integrations/{name}/test** — 외부 연동 API 키 테스트 (Phase 3)
+
+`name`: `"serper"` | `"github"` | `"google_calendar"`
+
+요청:
+```json
+{"api_key": "sk-..."}
+```
+
+응답 (성공):
+```json
+{"success": true, "response_ms": 142}
+```
+
+응답 (실패):
+```json
+{"success": false, "error": "HTTP 401"}
+```
+
+저장하지 않음. 성공 시 프론트에서 status를 "connected"로 업데이트.
 
 ---
 
