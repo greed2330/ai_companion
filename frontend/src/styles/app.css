@@ -193,8 +193,9 @@ button, input, select { font: inherit; }
 .position-slider { display: grid; grid-template-columns: 18px 1fr 40px; gap: 8px; align-items: center; }
 
 .integration-header { align-items: flex-start; justify-content: space-between; }
-.integration-controls { align-items: center; }
-.integration-controls .hana-input { flex: 1; }
+.integration-controls { align-items: center; flex-wrap: wrap; }
+.integration-controls .hana-input { flex: 1; min-width: 0; }
+.integration-controls .btn { flex-shrink: 0; }
 .integration-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
 .settings-badge-dot--connected { background: var(--hana-success); }
 .settings-badge-dot--yellow { background: var(--hana-warning); }

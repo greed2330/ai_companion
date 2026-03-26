@@ -103,7 +103,7 @@ function IntegrationsPanel() {
             </Badge>
           </div>
 
-          <div className="integration-actions">
+          <div className="integration-controls">
             <input
               className="hana-input"
               type={editing[integration.key] ? "text" : "password"}
