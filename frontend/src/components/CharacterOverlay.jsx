@@ -126,7 +126,14 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
 
     const channel = new BroadcastChannel("hana-overlay");
     channel.onmessage = (event) => {
-      if (event.data?.type !== "character_settings_updated") {
+      const { type } = event.data || {};
+
+      if (type === "lipsync_value") {
+        characterController.setAbstractParam("mouth_open", event.data.value ?? 0);
+        return;
+      }
+
+      if (type !== "character_settings_updated") {
         return;
       }
 
