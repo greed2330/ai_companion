@@ -65,6 +65,9 @@ let mainWindow = null;
 let tray = null;
 let ipcRegistered = false;
 let shortcutsRegistered = false;
+// 캐릭터 드래그 폴링 상태 (메인 프로세스 cursor polling 방식)
+let _dragPoll = null;
+let _dragOrigin = null;
 
 function isWindowUsable(targetWindow) {
   return Boolean(targetWindow) && !targetWindow.isDestroyed?.();
@@ -670,24 +673,47 @@ function registerIpcHandlers() {
   );
   ipcMain.handle("character:finish-drag", () => finishCharacterDrag());
   ipcMain.on("character:drag-start", () => {
-    if (!characterWindow) {
+    if (!characterWindow || store.get("characterPinned", false)) {
       return;
     }
 
-    characterWindow.setIgnoreMouseEvents(false);
-    if (typeof characterWindow.setFocusable === "function") {
-      characterWindow.setFocusable(true);
+    // 렌더러 delta 방식 대신 메인 프로세스에서 커서 좌표를 직접 폴링해서 이동.
+    // ignoreMouseEvents 상태는 건드리지 않아 비동기 타이밍 문제를 피한다.
+    if (_dragPoll) {
+      clearInterval(_dragPoll);
+      _dragPoll = null;
     }
+
+    const cursor = screen.getCursorScreenPoint();
+    const bounds = characterWindow.getBounds();
+    _dragOrigin = {
+      cursorX: cursor.x,
+      cursorY: cursor.y,
+      windowX: bounds.x,
+      windowY: bounds.y,
+    };
+
+    _dragPoll = setInterval(() => {
+      if (!characterWindow || !_dragOrigin) {
+        return;
+      }
+      const c = screen.getCursorScreenPoint();
+      characterWindow.setPosition(
+        Math.round(_dragOrigin.windowX + (c.x - _dragOrigin.cursorX)),
+        Math.round(_dragOrigin.windowY + (c.y - _dragOrigin.cursorY))
+      );
+    }, 16);
   });
   ipcMain.on("character:drag-end", () => {
+    if (_dragPoll) {
+      clearInterval(_dragPoll);
+      _dragPoll = null;
+    }
+    _dragOrigin = null;
     if (!characterWindow) {
       return;
     }
-
-    if (typeof characterWindow.setFocusable === "function") {
-      characterWindow.setFocusable(false);
-    }
-    characterWindow.setIgnoreMouseEvents(true, { forward: true });
+    finishCharacterDrag();
   });
   ipcMain.handle("character:toggle-pin", () => {
     const nextPinned = !store.get("characterPinned", false);

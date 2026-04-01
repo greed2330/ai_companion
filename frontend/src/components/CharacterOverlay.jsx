@@ -109,6 +109,27 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
     });
   }, []);
 
+  // 드래그 중 커서가 창 밖으로 나가도 mouseup을 감지하기 위한 전역 리스너.
+  // character:drag-end가 main process polling을 중단시킨다.
+  useEffect(() => {
+    function onGlobalMouseUp(event) {
+      if (!dragRef.current) {
+        return;
+      }
+      if (dragRef.current.button === 2) {
+        window.hanaDesktop?.finishCharacterDrag?.();
+        window.hanaDesktop?.endCharacterDrag?.();
+        if (!dragRef.current.moved) {
+          setMenuState({ open: true, x: event.clientX, y: event.clientY });
+        }
+      }
+      dragRef.current = null;
+    }
+
+    window.addEventListener("mouseup", onGlobalMouseUp);
+    return () => window.removeEventListener("mouseup", onGlobalMouseUp);
+  }, []);
+
   useEffect(() => {
     async function loadViewportSettings() {
       const appSettings = await window.hanaDesktop?.getAppSettings?.();
@@ -243,15 +264,8 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
       currentDrag.moved = true;
     }
 
-    if (currentDrag.button === 2) {
-      window.hanaDesktop?.moveCharacterBy?.(
-        event.screenX - currentDrag.screenX,
-        event.screenY - currentDrag.screenY
-      );
-      currentDrag.screenX = event.screenX;
-      currentDrag.screenY = event.screenY;
-    }
-
+    // 오른쪽 드래그 이동은 메인 프로세스 cursor polling이 처리한다.
+    // 여기서 moveCharacterBy를 호출하지 않는다.
   }
 
   function handleMouseUp(event) {
