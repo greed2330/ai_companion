@@ -1,12 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import PropTypes from "prop-types";
 import HierarchyCheckbox from "../../common/HierarchyCheckbox";
 import HanaSlider from "../../common/HanaSlider";
 
 function BehaviorPanel({ settings }) {
   const { current, updatePending } = settings;
-  const [searchLimit, setSearchLimit] = useState(10);
-  const serperConnected = false;
+  const searchLimit = current.autonomous?.search_limit ?? 10;
 
   // auto_crawl은 serperConnected=false일 때 영구 disabled → 전체 선택 계산에서 제외
   const allState = useMemo(() => {
@@ -36,7 +35,7 @@ function BehaviorPanel({ settings }) {
       proactive_chat: enabled,
       tip_bubbles: enabled,
       schedule_reminder: enabled,
-      auto_crawl: enabled && serperConnected,
+      auto_crawl: enabled,
     });
   }
 
@@ -84,8 +83,6 @@ function BehaviorPanel({ settings }) {
                 auto_crawl: value === "checked",
               })
             }
-            disabled={!serperConnected}
-            warning={!serperConnected ? "Serper API 연결 필요" : null}
           />
           <HierarchyCheckbox
             label="작업 돕기"
@@ -104,7 +101,17 @@ function BehaviorPanel({ settings }) {
             <div className="setting-label">일일 검색 시도</div>
           </div>
           <div className="slider-row">
-            <HanaSlider min={1} max={50} value={searchLimit} onChange={setSearchLimit} />
+            <HanaSlider
+              min={1}
+              max={50}
+              value={searchLimit}
+              onChange={(value) =>
+                updatePending("autonomous", {
+                  ...current.autonomous,
+                  search_limit: value,
+                })
+              }
+            />
             <span className="slider-val">{searchLimit}회</span>
           </div>
         </div>

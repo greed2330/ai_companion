@@ -217,9 +217,9 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 ```
 현재 작업 브랜치: codex/phase3-ux-d
 현재 작업 중인 파일: 없음 (소유권 해제)
-마지막 완료: Phase 3-D STT + TTS + generative character motion system 완료. STT/TTS/lipsync/characterController/useMotionStream + ChatWindow/CharacterOverlay 연동 + 테스트/빌드 검증 완료 (2026-03-24)
+마지막 완료: 드래그 블로커 해결 + Settings 미연결 항목 정리 완료 (2026-04-01)
 블로커: 없음
-다음 작업: dev PR 생성 대기. Handoff: "Phase 3-D complete. Generative motion: characterController.js (motion_sequence JSON). STT: sttService. TTS: ttsService. Lipsync: lipSyncService. Needs GET /settings/models/current-context from PROMPT_04-6B."
+다음 작업: dev PR 생성 대기
 ```
 
 **완료된 태스크:**
@@ -248,6 +248,14 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] Phase 3-B: 채팅 탭 사이드바 + 룸 선택 + `room_change` SSE 반영 + 자동/수동 룸 전환
 - [x] Phase 3-B: AFK 감지 + 시간대 기반 능동 반응 + `/proactive/check`/`/proactive/ignored` 연결
 - [x] Phase 3-B: 프론트 테스트 34/34 통과, `npm run build` 통과
+- [x] Phase 4.5 (프론트): backend /voice/stt + /voice/tts 엔드포인트 구현 완료 (kokoro-onnx TTS, openai-whisper STT)
+- [x] lipsync.js: BroadcastChannel 방식으로 재작성 — cross-window 아키텍처 수정, 주파수 감도 개선
+- [x] CharacterOverlay.jsx: lipsync_value BroadcastChannel 수신 + characterController.setAbstractParam 연결
+- [x] 캐릭터 창 드래그: main process cursor polling (16ms setInterval) 방식으로 교체 — renderer delta 방식 대비 안정적
+- [x] CharacterOverlay.jsx: 전역 mouseup 리스너 추가 — 커서 이탈 시에도 drag-end 보장
+- [x] BehaviorPanel.jsx: searchLimit 슬라이더 → updatePending 연결, serperConnected 하드코딩 제거
+- [x] useSettings.js: autonomous defaults에 search_limit: 10 추가
+- [x] 전체 검증: `npm test` (70/70 통과), `npm run build` 통과
 
 **Claude Code에게 전달할 브리핑:**
 - mainWindow unified. Sidebar done. room_change SSE done. Proactive reactions done. Settings tab is empty 05-C fills it.

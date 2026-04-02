@@ -26,6 +26,7 @@ export const DEFAULT_SETTINGS = {
     screen_reaction: true,
     schedule_reminder: false,
     auto_crawl: false,
+    search_limit: 10,
   },
   outputMode: "chat",
   theme: "dark-anime",
