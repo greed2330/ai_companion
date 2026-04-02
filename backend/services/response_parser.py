@@ -10,11 +10,10 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 EMOTION_KEYWORDS: dict[str, list[str]] = {
-    "HAPPY":        ["기뻐", "좋아", "신나", "ㅋㅋ", "ㅎㅎ", "!"],
+    "HAPPY":        ["기뻐", "좋아", "신나", "ㅋㅋ", "ㅎㅎ", "헤헤", "야호"],
     "CONCERNED":    ["걱정", "힘들", "괜찮아?", "많이", "쉬어"],
-    "EXCITED":      ["진짜?!", "대박", "오", "와"],
+    "EXCITED":      ["진짜?!", "대박", "오마이", "와우"],
     "CURIOUS":      ["왜", "어떻게", "그래?", "진짜"],
-    "SULKY":        ["...응", "그래", "알았어", "됐어"],
     "AFFECTIONATE": ["ㅠ", "고마워", "다행", "같이"],
 }
 
@@ -49,7 +48,7 @@ def _detect(text: str, mapping: dict[str, list[str]]) -> tuple[str, float]:
 @dataclass
 class ParsedResponse:
     text: str
-    emotion: str          # HAPPY | CONCERNED | EXCITED | CURIOUS | SULKY | AFFECTIONATE | IDLE
+    emotion: str          # HAPPY | CONCERNED | EXCITED | CURIOUS | AFFECTIONATE | IDLE
     intensity: float      # 0.0 ~ 1.0
     topic: str            # "coding" | "game" | "general"
     owner_emotion: str    # "DISTRESSED" | "HAPPY" | "NEUTRAL"

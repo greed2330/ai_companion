@@ -34,7 +34,7 @@ def write_daily_diary() -> dict:
     """오늘 대화를 기반으로 하나의 일기를 작성하고 파일로 저장한다."""
     logger.info("Celery task start: write_daily_diary")
     try:
-        result = asyncio.get_event_loop().run_until_complete(_write_diary_async())
+        result = asyncio.run(_write_diary_async())
         logger.info(
             "Celery task complete: write_daily_diary date=%s messages=%d",
             result["date"], result["message_count"],

@@ -29,6 +29,7 @@ async def build_context(
     session_duration: int = 0,
     is_first_message: bool = False,
     memories: Optional[list[dict]] = None,
+    session_hint: str = "",
 ) -> dict:
     """
     LLM 호출에 필요한 컨텍스트를 구성한다.
@@ -45,19 +46,14 @@ async def build_context(
     visual_context   : OCR/Vision 화면 설명 (Phase 4)
     session_duration : 세션 경과 시간 (분)
     is_first_message : 이 대화의 첫 메시지 여부
-    memories         : 이미 검색된 장기기억 목록 (없으면 DB 조회)
+    memories         : 이미 검색된 장기기억 목록 (pipeline이 반드시 넘길 것)
+    session_hint     : judge_session_start()가 반환한 system_hint (pipeline이 넘김)
 
     Returns
     -------
     dict with keys: system_prompt, use_think, extra_context
     """
     from backend.services.llm import build_system_prompt, should_use_think
-    from backend.services.sulky_service import is_sulky
-
-    # 메모리가 없으면 DB 조회
-    if memories is None:
-        from backend.services.memory import search_memory
-        memories = await search_memory(_OWNER_USER_ID, message)
 
     memory_list = [m["fact"] for m in memories] if memories else None
 
@@ -81,7 +77,6 @@ async def build_context(
         persona=persona,
         interaction_type=interaction_type,
         voice_mode=voice_mode,
-        sulky=is_sulky(),
         memories=memory_list,
         preferences=preferences,
         philosophy=philosophy,
@@ -106,15 +101,9 @@ async def build_context(
     if situation:
         system_prompt += "\n\n## Current Situation\n" + "\n".join(f"- {s}" for s in situation)
 
-    # 세션 시작 힌트 (첫 메시지에만)
-    if is_first_message:
-        from backend.services.session_judge import judge_session_start
-        session_ctx = judge_session_start(
-            first_message=message,
-            audio_energy=audio_features.get("energy") if audio_features else None,
-        )
-        if session_ctx.system_hint:
-            system_prompt += f"\n\n## Session Context\n{session_ctx.system_hint}"
+    # 세션 시작 힌트: pipeline이 넘겨준 session_hint를 그대로 주입
+    if is_first_message and session_hint:
+        system_prompt += f"\n\n## Session Context\n{session_hint}"
 
     use_think = should_use_think(message, interaction_type)
     if voice_mode:

@@ -22,7 +22,7 @@ def run_confidence_decay() -> dict:
     """7일 이상 참조 안 된 기억의 confidence를 0.97배 감소시킨다."""
     logger.info("Celery task start: run_confidence_decay")
     try:
-        result = asyncio.get_event_loop().run_until_complete(_run_decay())
+        result = asyncio.run(_run_decay())
         logger.info(f"Celery task complete: run_confidence_decay updated={result['updated']}")
         return result
     except Exception as exc:
@@ -66,7 +66,7 @@ def compress_volatile_memories() -> dict:
     """7일 이상 된 단기 휘발성 기억을 LLM으로 압축해 장기 기억으로 이관한다."""
     logger.info("Celery task start: compress_volatile_memories")
     try:
-        result = asyncio.get_event_loop().run_until_complete(_compress_volatile())
+        result = asyncio.run(_compress_volatile())
         logger.info("Celery task complete: compress_volatile_memories compressed=%d", result["compressed"])
         return result
     except Exception as exc:

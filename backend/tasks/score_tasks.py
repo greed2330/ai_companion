@@ -73,7 +73,7 @@ def score_message(
     """
     logger.info("Celery task start: score_message message_id=%s", message_id)
     try:
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             _score_async(message_id, user_message, assistant_response, interaction_type)
         )
         logger.info(

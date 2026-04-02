@@ -67,7 +67,6 @@ def build_system_prompt(
     persona: Optional[dict] = None,
     interaction_type: Optional[str] = None,
     voice_mode: bool = False,
-    sulky: bool = False,
     memories: Optional[list[str]] = None,
     preferences: str = "",
     philosophy: str = "",
@@ -104,9 +103,6 @@ def build_system_prompt(
         prompt += "\n코딩 관련 답변은 정확성과 재현 가능성을 우선한다."
     elif interaction_type == "game":
         prompt += "\n게임 대화는 리액션을 섞되 정보는 분명하게 말한다."
-
-    if sulky:
-        prompt += "\n조금 삐친 상태지만 과하게 틱틱대지 말고 은근하게만 드러낸다."
 
     if voice_mode:
         prompt += _VOICE_MODE_ADDITION
@@ -156,12 +152,23 @@ def should_use_think(message: str, interaction_type: Optional[str] = None) -> bo
 
 
 def postprocess_for_voice(content: str) -> str:
-    content = re.sub(r"[^\w\s가-힣,.!?~]", "", content)
+    # 이모지 제거 (유니코드 이모지 범위)
+    content = re.sub(
+        r"[\U00010000-\U0010ffff"
+        r"\U0001F300-\U0001F9FF"
+        r"\u2600-\u26FF\u2700-\u27BF]",
+        "",
+        content,
+    )
+    # 마크다운 기호만 제거 (JSON 구조 문자는 보존)
     content = re.sub(r"[*#`_]", "", content)
     if len(content) > 50:
         sentences = content.split(".")
         content = sentences[0] + ("." if len(sentences) > 1 else "")
     return content.strip()
+
+
+_THINK_TAG_PAT = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 async def stream_chat(
@@ -225,7 +232,10 @@ async def stream_chat(
 
                     content = msg.get("content", "")
                     if content:
-                        yield content
+                        # <think>…</think> 태그가 content에 노출될 경우 제거
+                        content = _THINK_TAG_PAT.sub("", content).strip()
+                        if content:
+                            yield content
 
                     if data.get("done"):
                         return

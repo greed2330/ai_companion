@@ -53,16 +53,6 @@ def reset_mood():
 
 
 @pytest.fixture(autouse=True)
-def reset_sulky():
-    import backend.services.sulky_service as sulky_mod
-    sulky_mod._sulky = False
-    sulky_mod._since = None
-    yield
-    sulky_mod._sulky = False
-    sulky_mod._since = None
-
-
-@pytest.fixture(autouse=True)
 def reset_session_start():
     import backend.services.chat_pipeline as cp_mod
     cp_mod._session_start.clear()
