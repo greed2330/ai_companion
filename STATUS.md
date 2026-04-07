@@ -42,7 +42,81 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 - [x] 행동 탭 전체 선택 논리 오류 → disabled인 auto_crawl을 allState 계산에서 제외
 - [x] 위치 조정 팝업 기본값/적용 버튼 → popup-footer로 분리, 하단 고정
 
-**🔴 다음 세션에서 해결해야 할 이슈 (우선순위 순):**
+---
+
+## 📐 아키텍처 결정 사항 (2026-04-07 오너 회의)
+
+### 전체 방향
+- GPT 제안 아키텍처 검토 결과: **A (현재 방향 유지)**
+- HANA 현재 구조(Phase 1~4.5)가 이미 3계층 메모리 + Context Builder + LLM 흐름을 구현 중
+- Re-ranking 레이어는 1인용 시스템에서 불필요 → 도입 안 함
+- LoRA for MCP/behavioral pattern은 Phase 5 이후 검토
+
+### 최종 확정 실행 흐름
+```
+Input
+→ Memory Retrieval (top-k cosine, Structured + Vector + Episodic 병렬)
+→ Context Builder (mood + persona + memories + session_hint)
+→ LLM (Phase 5 이후 LoRA 적용)
+→ Response (SSE streaming)
+→ Background: 감정 파싱 + 메모리 업데이트
+```
+
+### Python 추상화 현황 및 방침
+- 현재 코드: 모듈 레벨 함수 위주, 공식 인터페이스 없음
+- 유일한 예외: `LLMRouter` 클래스 (multi-backend 추상화)
+- **방침:** Phase 5 이전에 핵심 교체 가능 서비스 3개에 `typing.Protocol` 추가
+  - `MemoryBackend` (ChromaDB 교체 대비)
+  - `TTSEngine` (Kokoro → 다른 엔진 교체 대비)
+  - `STTEngine` (Whisper → 다른 엔진 교체 대비)
+- 나머지는 현행 유지 (과도한 추상화 금지)
+
+---
+
+## ⚠️ 당장 해야 할 일 (아키텍처 부채)
+> 2026-04-02 분석. 기능은 동작하지만 API 모드 전환 시 과금 폭탄 및 품질 저하 발생.
+
+### [HIGH] LLM 다중 호출 — API 모드 전환 시 과금 폭탄
+현재 대화 1회당 동일 모델(메인 챗 모델)을 최대 3번 호출함.
+**API 모드(GPT-4o/Gemini)로 전환하면 토큰 비용 3배.**
+
+| 호출 | 위치 | 모델 | 실제로 필요한가? |
+|------|------|------|-----------------|
+| 1st: 메인 응답 스트리밍 | chat_pipeline.py | 메인 모델 | ✅ 필수 |
+| 2nd: 내부 상태 JSON (motion_sequence 등) | chat_pipeline.py `_background_process` | 메인 모델 | ❌ 룩업 테이블로 교체 가능 |
+| 3rd: 응답 품질 자동 채점 | tasks/score_tasks.py | 메인 모델 | ❌ API 모드 시 비활성화 필요 |
+
+추가 발견된 백그라운드 LLM 호출 (모두 메인 모델 사용):
+- `memory_tasks.py`: 세션 종료 시 대화 요약
+- `diary_tasks.py`: 매일 자정 일기 작성
+- `decay_tasks.py`: 휘발 메모리 압축 (7일 이상)
+- `routers/settings.py`: 페르소나 프리뷰 3회 연속 호출
+
+**근본 문제:** `OLLAMA_WORKER_MODEL` 환경변수가 있지만 `llm_router`가 이를 전혀 사용하지 않음.
+백그라운드 작업 전부 `get_current_chat_model()` → 메인 모델 그대로 사용.
+
+**해결 방향:**
+1. `llm_router`에 `stream_worker()` 메서드 추가 → `OLLAMA_WORKER_MODEL` 사용
+2. 2nd call (motion_sequence) → 감정 기반 룩업 테이블로 교체 (LLM 제거)
+3. 백그라운드 태스크들(채점/요약/일기/압축) → `stream_worker()` 사용
+4. API 모드 감지 시 자동 채점 Celery 태스크 skip 처리
+
+### [MEDIUM] 자동 채점 신뢰도 문제
+- 4B 워커 모델 의도였으나 실제로는 메인 모델(14B)이 채점 중
+- qwen3 계열은 think:false 시 판단력 저하 → 채점 결과가 노이즈 수준일 가능성
+- 이 데이터가 파인튜닝 데이터셋(hana_dataset_message)에 누적됨
+- **저품질 채점 데이터 → 저품질 파인튜닝 → 모델 성능 저하 우려**
+- 해결: 자동 채점 제거 or 오너 명시 피드백(👍👎)만 신뢰
+
+### [LOW] 무드 이중 업데이트 (UI jitter)
+- 스트리밍 끝: `detect_mood_from_text` (휴리스틱) → `done` 이벤트
+- 백그라운드: `parse_response` (동일 수준 휴리스틱) → `emotion_update` SSE
+- 두 값이 다르면 프론트 무드가 순간 뒤집힘
+- 해결: 스트리밍 측 `set_mood()` 제거, 백그라운드 단일 경로로 통일
+
+---
+
+## 🔴 다음 세션에서 해결해야 할 이슈 (우선순위 순):
 
 ### 1. TTS 작동 안 됨 — 의존성 누락
 - `misaki[ko]` 설치됐으나 내부 의존성 `nltk` 없어서 import 실패
