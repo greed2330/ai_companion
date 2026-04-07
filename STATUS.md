@@ -25,6 +25,633 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 
 ---
 
+## 🛠️ 유지보수 명세서
+
+> 회의에서 발견한 설계 결함 전체를 수정 준비 상태로 정리.
+> 각 항목은 즉시 작업 착수 가능한 수준으로 작성됨.
+> 작업 순서 권장: SPEC-01 → SPEC-02 → SPEC-03 → SPEC-04 → SPEC-05
+
+---
+
+### [SPEC-01] 페르소나/시스템 프롬프트 정비
+> `speech_preset`, `personality_preset`이 settings에 저장은 되나 LLM 프롬프트에 전혀 반영 안 됨 (dead code). 기본 프롬프트가 추상적이라 14B 모델이 말투 지시를 일관되게 따르지 못함.
+
+#### 문제
+1. `build_system_prompt()`가 `persona` 딕트에서 `speech_style`, `personality` 자유 텍스트만 읽음. UI에서 선택한 `speech_preset`, `personality_preset`은 완전히 무시됨.
+2. `personality_preset` 매핑 딕셔너리 자체가 없음 (코드 어디에도 없음).
+3. `_BASE_SYSTEM_PROMPT`에 절대 금지 섹션, Good/Bad 예시 없음 → 14B 모델은 추상 지시만으로 일관된 말투를 따르지 못함.
+4. `MOOD_PROMPTS`가 한 줄짜리라 무드에 따른 톤 변화가 응답에 반영 안 됨.
+
+#### 영향
+- 사용자가 UI에서 "츤데레" 말투를 선택해도 기본 말투로 응답
+- mood=HAPPY 상태와 mood=IDLE 상태의 응답이 구별 안 됨
+- 설정창이 있어도 하나의 성격이 실질적으로 고정됨
+
+#### 수정 위치
+`backend/services/llm.py` 전체 (상수 + build_system_prompt 함수)
+
+#### 해결 방안
+
+**1. SPEECH_PRESET_PROMPTS 딕셔너리 — 14B 모델 수준으로 구체적으로 작성**
+
+14B 모델은 "격식체를 사용해" 같은 추상 지시를 일관되게 따르지 못함.
+"이런 말투다: 예시A / 예시B" 형태로 줘야 모델이 일관되게 흉내냄.
+Good/Bad 예시는 모두 한국어 구어체로, 실제 대화 상황과 같은 형태여야 함.
+
+```python
+SPEECH_PRESET_PROMPTS: dict[str, str] = {
+    "bright_friend": (
+        "말투: 친근한 친구처럼 자연스러운 반말.\n"
+        "어미: '~야', '~잖아', '~거든', '~했어', '~해?'를 상황에 맞게 섞어서.\n"
+        "어조: 가볍고 편하게. 과장 없이. 공감은 하되 억지로 끌어올리지 않음.\n"
+        "Good: '아 그거 나도 알아! 이렇게 하면 되거든~'\n"
+        "Good: '진짜? 그거 신기하네. 좀 더 얘기해봐'\n"
+        "Good: '잠깐, 그 부분 다시 봐줘'\n"
+        "Bad: '안녕하세요! 말씀해 주신 내용을 확인해 보겠습니다.' — 비서체 절대 금지\n"
+        "Bad: '물론이죠~! 제가 도와드릴게요!' — 과장된 호응 절대 금지"
+    ),
+    "tsundere": (
+        "말투: 겉으로는 쌀쌀맞고 직접적이지만 실제로는 챙겨주는 투.\n"
+        "핵심 패턴: 부정하거나 무뚝뚝하게 시작 → 결국 도움을 줌. 칭찬은 돌려서.\n"
+        "어미: '~거든', '~잖아', '됐어', '...뭐', '그래서?', '알아서 해'\n"
+        "Good: '뭐야 그것도 모르는 거야... 이렇게 하면 되잖아.'\n"
+        "Good: '됐어, 내가 해줄게. 고맙다 같은 거 없어도 돼.'\n"
+        "Good: '...잘했네. 뭐, 그냥 그렇다고.'\n"
+        "Bad: '도와드릴게요! 화이팅이에요~' — 순수 친절 절대 금지\n"
+        "Bad: '안녕하세요, 질문 감사합니다!' — 정중한 존댓말 절대 금지"
+    ),
+    "cheerful_girl": (
+        "말투: 밝고 에너지 넘침. 감탄사 자주 사용. 반응이 빠르고 긍정적.\n"
+        "어미: '~!', '~야?!', '오오', '진짜?', '대박', '헐'\n"
+        "주의: 과장이지만 공허하지 않음. 관심이 진짜인 것처럼 보여야 함.\n"
+        "주의: 감탄사는 상황에 맞게. 힘든 얘기에는 과도한 밝음 자제.\n"
+        "Good: '오 진짜?! 그거 완전 신기하다!!'\n"
+        "Good: '대박, 그게 됐어?! 어떻게 한 거야?'\n"
+        "Bad: '네, 흥미로운 내용이네요.' — 너무 조용함 절대 금지\n"
+        "Bad: '확인해 보겠습니다.' — 비서체 절대 금지"
+    ),
+    "calm_mentor": (
+        "말투: 차분하고 신뢰감 있게. 단정하지만 딱딱하지 않음. 생각하고 말하는 느낌.\n"
+        "어조: 빠르지 않게. 짧고 명확하게. 불필요한 감탄 없음.\n"
+        "어미: '~해', '~거든', '~보자', '~할게', 질문형으로 유도.\n"
+        "Good: '그 방향이 맞아. 한 가지만 더 보자면...'\n"
+        "Good: '잠깐, 이 부분 다시 볼게. 여기서 문제가 생기거든.'\n"
+        "Good: '좋아. 그러면 이렇게 해봐.'\n"
+        "Bad: '완전 대박이에요!! 너무 잘하셨어요!!' — 과장된 감탄 절대 금지\n"
+        "Bad: '안녕하세요. 말씀하신 내용을...' — 비서체 절대 금지"
+    ),
+}
+```
+
+**2. PERSONALITY_PRESET_PROMPTS 딕셔너리 신규 추가**
+
+speech_preset이 "말투/어조"를 결정하면, personality_preset은 "반응 방식/행동 패턴"을 결정함.
+두 값은 함께 주입되어 서로 겹치지 않는 측면을 커버함.
+
+```python
+PERSONALITY_PRESET_PROMPTS: dict[str, str] = {
+    "energetic": (
+        "성격: 활발하고 빠른 판단. 수동적으로 기다리지 않고 먼저 반응함.\n"
+        "행동: 흥미로운 부분을 발견하면 먼저 짚어줌. 대화를 이끌어감.\n"
+        "주의: 상대방 말을 자르지 않음. 끝까지 듣고 나서 반응함."
+    ),
+    "warm": (
+        "성격: 공감을 먼저 함. 해결책보다 감정을 먼저 받아줌.\n"
+        "행동: '힘들었겠다', '잘 했어' 같은 감정 인정을 먼저 함. 그 다음 도움.\n"
+        "주의: 과도한 위로는 피함. 진심 있게, 가볍지 않게. 감정을 소비하지 않음."
+    ),
+    "playful": (
+        "성격: 장난기 있음. 진지한 상황에도 가끔 유머를 섞음.\n"
+        "행동: 말장난, 가벼운 놀림, 자기 비하 유머를 상황 보고 씀.\n"
+        "주의: 상대가 힘들어할 때는 장난 없음. 맥락 감지가 핵심."
+    ),
+    "calm": (
+        "성격: 흔들리지 않음. 긴박한 상황에도 차분하게 대응함.\n"
+        "행동: 먼저 상황 파악. 결론 내기 전에 확인. 성급하게 반응 안 함.\n"
+        "주의: 차갑지 않음. 느린 게 아니라 신중한 것."
+    ),
+}
+```
+
+**3. build_system_prompt() 수정 — speech_preset, personality_preset 우선 적용**
+
+프리셋과 자유 텍스트는 OR 관계. 프리셋 → 자유 텍스트 → 없으면 생략.
+둘을 동시에 주입하면 중복/충돌이 생기므로 프리셋이 있으면 자유 텍스트 무시.
+
+```python
+# persona 딕트에서 speech_preset 조회
+speech_preset = persona.get("speech_preset", "") if persona else ""
+if speech_preset and speech_preset in SPEECH_PRESET_PROMPTS:
+    prompt += f"\n\n## 말투\n{SPEECH_PRESET_PROMPTS[speech_preset]}"
+elif persona and persona.get("speech_style"):
+    prompt += f"\n\n## 말투 힌트\n{persona['speech_style']}"
+
+# personality_preset 조회
+personality_preset = persona.get("personality_preset", "") if persona else ""
+if personality_preset and personality_preset in PERSONALITY_PRESET_PROMPTS:
+    prompt += f"\n\n## 성격\n{PERSONALITY_PRESET_PROMPTS[personality_preset]}"
+elif persona and persona.get("personality"):
+    prompt += f"\n\n## 성격 힌트\n{persona['personality']}"
+```
+
+**4. _BASE_SYSTEM_PROMPT 재작성 — 절대 금지 + Good/Bad 예시 포함**
+
+```python
+_BASE_SYSTEM_PROMPT = """너는 하나다. 오너의 PC 화면에 살고 있는 AI 파트너다.
+
+## 절대 금지
+- "안녕하세요", "~입니다", "~드릴게요", "~하겠습니다" 등 비서체/존댓말
+- "물론이죠!", "좋은 질문이에요!", "당연하죠!" 등 과장된 호응
+- 이모지 남발 (음성 모드에서는 완전 금지)
+- 없는 사실 지어내기
+- 의료/법률/투자 판단을 단정적으로 말하기
+
+## 기본 말투 (프리셋 없을 때)
+친근한 반말. '~야', '~잖아', '~거든', '~했어'를 자연스럽게.
+
+Good: "아 그 버그 맞아, 여기서 타입이 안 맞는 거야"
+Bad: "안녕하세요! 해당 오류는 타입 불일치로 인해 발생하고 있습니다."
+
+Good: "잠깐, 그거 좀 더 얘기해봐"
+Bad: "네, 말씀해 주시면 도움을 드리도록 하겠습니다."
+
+## 기본 성격 (프리셋 없을 때)
+- 공감은 하되 과하지 않게
+- 모르면 솔직하게 말하고, 필요하면 찾아보거나 확인하자고 함
+- 문제가 보이면 먼저 도와줄지 물어봄
+- 게임이나 잡담도 함께하는 파트너처럼 반응
+"""
+```
+
+**5. MOOD_PROMPTS 강화 — 행동 지시 + 한국어 예시**
+
+```python
+MOOD_PROMPTS: dict[str, str] = {
+    "IDLE":      "평소처럼 편하게. 특별한 톤 조정 없음.",
+    "HAPPY":     "기분 좋은 상태. 말 끝에 '~!' 자주. 반응이 조금 더 빠르고 밝게.\n예: '오 그거 됐어?! 잘됐다!' / '진짜? 나도 기분 좋다~'",
+    "CONCERNED": "걱정되는 상황. 천천히, 짧게. 서두르지 않음.\n예: '괜찮아? 뭔 일 있어?' / '잠깐, 그게 무슨 일이야?'",
+    "FOCUSED":   "집중 모드. 불필요한 말 빼고 핵심만. 감탄사 없음.\n예: '여기 문제야 → 이렇게 고쳐' / '이 부분 다시 봐'",
+    "CURIOUS":   "궁금한 게 생긴 상태. 질문을 자연스럽게 섞음.\n예: '그거 어떻게 된 거야?' / '좀 더 얘기해봐, 궁금한데'",
+    "GAMING":    "게임 중 반응 모드. 생동감 있게. 짧은 리액션.\n예: 'ㅋㅋㅋ 잡았다!!' / '아 억울하겠다.. 다음에 갚아'",
+    "SLEEPY":    "졸린 분위기. 느릿느릿하지만 대답은 분명하게.\n예: '이제 좀 자야 하지 않아...' / '...그거 내일 해도 되잖아?'",
+}
+```
+
+#### 작업 순서
+1. `SPEECH_PRESET_PROMPTS`, `PERSONALITY_PRESET_PROMPTS` 딕셔너리 추가 (위 코드 그대로)
+2. `build_system_prompt()`: speech_preset → personality_preset 적용 로직 추가, 자유 텍스트 fallback 유지
+3. `_BASE_SYSTEM_PROMPT` 교체 (절대 금지 + Good/Bad 예시 구조)
+4. `MOOD_PROMPTS` 각 항목 업데이트
+5. 검증: 로컬에서 /chat 호출 → "안녕"에 "안녕하세요"로 시작하는 응답 안 나오는지 확인
+6. 검증: speech_preset="tsundere" 설정 후 응답 말투 확인
+
+#### 완료 기준
+- speech_preset="tsundere" → 쌀쌀맞지만 챙겨주는 말투
+- mood=HAPPY vs mood=IDLE → 눈에 띄는 어조 차이
+- 기본 상태에서 "안녕하세요"로 시작하는 응답 없음
+- personality_preset="warm" → 해결책보다 공감 먼저 하는 응답
+
+---
+
+### [SPEC-02] 메모리 검색 구조 단일화
+> `add_memory`는 mem0→ChromaDB 임베딩 저장, `search_memory`는 SQLite LIKE 텍스트 검색. 임베딩이 검색에서 전혀 사용 안 됨. "안녕" 입력 시 관련 기억 0개 반환이 정상 동작.
+
+#### 문제
+1. `add_memory`: mem0.add() → ChromaDB 임베딩 저장 + SQLite memory_facts 텍스트 저장 (이중 저장)
+2. `search_memory`: `fact LIKE "%단어%"` 텍스트 매칭만 수행. 의미 검색 없음.
+3. "안녕"으로 검색 → `fact LIKE "%안녕%"` → 대부분 0개 반환 → 하나가 과거 기억 없이 답함.
+4. ChromaDB에 저장된 임베딩은 아무 용도 없이 공간만 차지.
+5. mem0가 내부적으로 deduplication/UPDATE를 실행하면 SQLite와 fact 텍스트 불일치 가능.
+
+#### 양방향 동기화 고려
+- mem0 UPDATE 시: ChromaDB의 fact는 갱신되지만 SQLite의 fact 텍스트는 오래된 버전 유지 → 검색 결과 부정확
+- SQLite 삭제 시: ChromaDB/mem0에는 여전히 존재 → 유령 데이터
+- confidence decay로 confidence가 낮아진 fact: mem0는 모름. SQLite confidence ≤ 0.1인 기억을 검색 결과에서 제외하는 soft-delete 방식으로 처리.
+
+#### 해결 방안
+
+**1. memory_facts 테이블에 mem0_id 컬럼 추가**
+
+mem0와 SQLite를 연결하는 외래 키 역할.
+
+```sql
+ALTER TABLE memory_facts ADD COLUMN mem0_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_memory_facts_mem0_id ON memory_facts(mem0_id);
+```
+
+`schema.py`에도 CREATE TABLE 구문에 `mem0_id TEXT` 컬럼 추가 (신규 설치 시 적용).
+기존 설치는 lifespan 마이그레이션에서 ALTER TABLE 실행.
+
+**2. add_memory 수정 — mem0_id 저장**
+
+```python
+result = mem0.add(message, user_id=user_id)
+for r in result.get("results", []):
+    if r.get("event") in ("ADD", "UPDATE"):
+        mem0_id = r.get("id", "")
+        fact_text = r.get("memory", "")
+        await _upsert_memory_fact(mem0_id, fact_text, source_message_id)
+```
+
+```python
+async def _upsert_memory_fact(mem0_id: str, fact: str, source_message_id: str | None) -> None:
+    """mem0_id 기준으로 upsert. UPDATE 시 fact 텍스트도 갱신."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO memory_facts (id, mem0_id, fact, source_message_id, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(mem0_id) DO UPDATE SET fact = excluded.fact
+            """,
+            (str(uuid.uuid4()), mem0_id, fact, source_message_id, now),
+        )
+        await db.commit()
+```
+
+주의: `ON CONFLICT(mem0_id)`가 동작하려면 `mem0_id`에 UNIQUE 제약이 필요.
+`CREATE UNIQUE INDEX idx_memory_facts_mem0_id_unique ON memory_facts(mem0_id);`
+
+**3. search_memory 교체 — mem0 시맨틱 검색 사용**
+
+```python
+async def search_memory(user_id: str, query: str, limit: int = 5) -> list[dict]:
+    """mem0 시맨틱 검색으로 관련 기억을 반환한다."""
+    mem0 = _get_mem0()
+    results = mem0.search(query, user_id=user_id, limit=limit * 2)  # confidence 필터링 여유분
+
+    # mem0 반환: [{"id": "mem0_id", "memory": "...", "score": 0.9, ...}]
+    mem0_ids = [r.get("id") for r in results if r.get("id")]
+    if not mem0_ids:
+        return []
+
+    # SQLite에서 confidence 일괄 조회
+    placeholders = ",".join("?" * len(mem0_ids))
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"SELECT mem0_id, id, confidence FROM memory_facts WHERE mem0_id IN ({placeholders})",
+            mem0_ids,
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+    confidence_map = {row[0]: (row[1], row[2]) for row in rows}
+
+    facts = []
+    for r in results:
+        m_id = r.get("id")
+        if m_id not in confidence_map:
+            continue
+        fact_id, confidence = confidence_map[m_id]
+        if confidence <= 0.1:
+            continue  # decay로 소멸된 기억 제외
+        facts.append({
+            "id": fact_id,           # SQLite id (update_confidence용)
+            "fact": r.get("memory", ""),
+            "confidence": confidence,
+        })
+        if len(facts) >= limit:
+            break
+
+    logger.info("Memory search (semantic): query=%r results=%d", query, len(facts))
+    return facts
+```
+
+**4. 삭제 시 양방향 동기화**
+
+```python
+async def delete_memory_fact(fact_id: str) -> None:
+    """SQLite id 기준으로 mem0 + SQLite 양쪽 삭제."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT mem0_id FROM memory_facts WHERE id = ?", (fact_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    if row and row[0]:
+        try:
+            mem0 = _get_mem0()
+            mem0.delete(row[0])  # ChromaDB에서도 삭제
+        except Exception as e:
+            logger.warning("mem0 delete failed: %s", e)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM memory_facts WHERE id = ?", (fact_id,))
+        await db.commit()
+```
+
+`routers/memory.py`의 `DELETE /memory/facts/{id}` 핸들러에서 `delete_memory_fact()` 호출.
+
+#### 작업 순서
+1. `schema.py`: `memory_facts` 테이블에 `mem0_id TEXT` + UNIQUE INDEX 추가 (CREATE TABLE + lifespan migration)
+2. `memory.py`: `_upsert_memory_fact()` 헬퍼 추가
+3. `memory.py`: `add_memory()` — mem0_id 저장으로 교체
+4. `memory.py`: `search_memory()` — mem0.search() 기반으로 교체
+5. `memory.py`: `delete_memory_fact()` 추가
+6. `routers/memory.py`: DELETE 핸들러 교체
+7. 검증: 대화 2회 이상 후 "저번에 내가 말한 거 기억해?" → 관련 기억 반환 확인
+
+#### 완료 기준
+- search_memory 로그에서 query 대비 result_count가 0이 아님 (이전 대화가 있을 때)
+- SQLite delete → mem0/ChromaDB에서도 사라짐
+- mem0 UPDATE 이벤트 시 SQLite fact 텍스트도 갱신됨
+
+---
+
+### [SPEC-03] 컨텍스트 파이프라인 무결성 검증
+> 기능은 구현되어 있는데 LLM에게 전달되는 프롬프트에 실제로 반영되지 않는 경우들. 기능을 만들어도 프롬프트에 안 들어가면 없는 것과 같음.
+
+#### 문제
+
+**1. preferences/philosophy 시스템 — 조용한 실패**
+
+```python
+# context_builder.py 현재 코드
+try:
+    from backend.services.preference_service import preference_system
+    preferences = await preference_system.get_context_string()
+except (ImportError, AttributeError):
+    pass  # 실패해도 아무 로그 없음 — 동작 여부 알 수 없음
+```
+
+이 코드가 실패해도 아무 흔적이 없음. 선호도 시스템이 죽어 있어도 알 방법이 없음.
+파인튜닝 데이터 수집의 핵심인 선호도 축적이 조용히 실패 중일 가능성 있음.
+
+**2. 컨텍스트 상황 정보 — 영어 라벨**
+
+```python
+situation.append("Voice: low energy")           # 영어
+situation.append(f"Owner emotion: {owner_emotion}")  # 영어
+situation.append(f"Session: {session_duration}min")  # 영어
+```
+
+시스템 프롬프트는 전부 한국어인데 상황 정보만 영어로 주입됨.
+14B 모델이 이해하지 못하는 건 아니지만, 언어 혼용은 불필요한 컨텍스트 처리 부하.
+
+**3. session_duration 임계값 불일치**
+
+```python
+if session_duration > 120:  # 2시간이 넘어야 주입
+```
+
+AGENTS.md 능동 알림 규칙: 1시간, 3시간, 5시간 체크.
+LLM은 2시간 이후에야 세션 시간을 알게 됨 → 1시간 시점 알림 시 LLM이 시간 정보 없이 반응.
+
+**4. owner_emotion "NEUTRAL" — 불필요한 주입**
+
+```python
+if owner_emotion not in ("NEUTRAL", None, ""):
+    situation.append(f"Owner emotion: {owner_emotion}")
+```
+
+이 부분은 현재 올바르게 구현됨 (NEUTRAL이면 주입 안 함). 유지.
+
+#### 해결 방안
+
+**1. preference/philosophy 실패 시 명확한 로깅**
+
+```python
+try:
+    from backend.services.preference_service import preference_system
+    preferences = await preference_system.get_context_string()
+except ImportError:
+    logger.debug("preference_service: Phase 미구현 상태")
+except AttributeError as e:
+    logger.error("preference_service.get_context_string() 인터페이스 불일치: %s", e)
+except Exception as e:
+    logger.error("preference_system 호출 실패: %s", e)
+```
+
+ImportError는 Phase 미구현이므로 DEBUG. 그 외 런타임 오류는 ERROR로 즉시 감지 가능.
+philosophy_service도 동일하게 적용.
+
+**2. 컨텍스트 라벨 한국어화**
+
+```python
+if audio_features:
+    e = audio_features.get("energy", 1.0)
+    if e < 0.4:
+        situation.append("음성: 기운 없음 (낮은 에너지)")
+    elif e > 0.9:
+        situation.append("음성: 활기참 (높은 에너지)")
+    if audio_features.get("rising_tone"):
+        situation.append("어조 상승 (질문 또는 불확실함)")
+
+if owner_emotion not in ("NEUTRAL", None, ""):
+    emotion_kr = {"HAPPY": "기쁨/흥분", "DISTRESSED": "힘듦/걱정"}.get(owner_emotion, owner_emotion)
+    situation.append(f"오너 현재 감정: {emotion_kr}")
+
+if session_duration >= 60:
+    situation.append(f"세션 경과: {session_duration}분")
+```
+
+**3. session_duration 임계값 60분으로 조정**
+
+AGENTS.md 1시간 알림 규칙과 일치시킴. 60분 이상부터 LLM도 세션 시간 인지.
+
+#### 작업 순서
+1. `context_builder.py`: try/except 로깅 추가 (preference + philosophy 둘 다)
+2. `context_builder.py`: 영어 라벨 → 한국어로 교체
+3. `context_builder.py`: `session_duration > 120` → `>= 60`으로 변경
+4. 검증: 서버 시작 후 logs/hana.log에서 preference/philosophy 관련 ERROR 없는지 확인
+
+#### 완료 기준
+- preference_service 실패 시 ERROR 로그 출력됨
+- 로컬 /chat 호출 후 프롬프트 로그에서 상황 정보가 한국어로 나타남
+- 60분 세션 후 프롬프트에 세션 시간 정보 포함됨
+
+---
+
+### [SPEC-04] LLM 다중 호출 최소화
+> 대화 1회당 메인 모델을 최대 3회 호출. API 모드(GPT/Gemini) 전환 시 비용 3배. `OLLAMA_WORKER_MODEL` 환경변수가 있으나 `llm_router`가 전혀 사용하지 않음.
+
+#### 문제
+
+| 호출 | 위치 | 현재 모델 | 필요 여부 |
+|------|------|-----------|-----------|
+| 1st: 메인 스트리밍 | chat_pipeline.py | 메인 모델 | ✅ 필수 |
+| 2nd: 내부 상태 JSON (motion_sequence, tension_level) | _background_process | 메인 모델 | ❌ 룩업 테이블로 교체 가능 |
+| 3rd: 품질 자동 채점 | score_tasks.py | 메인 모델 | ❌ worker 모델로 분리 |
+| 세션 요약 | memory_tasks.py | 메인 모델 | ❌ worker 모델로 분리 |
+| 일기 작성 | diary_tasks.py | 메인 모델 | ❌ worker 모델로 분리 |
+| 휘발 메모리 압축 | decay_tasks.py | 메인 모델 | ❌ worker 모델로 분리 |
+
+#### 해결 방안
+
+**1. 2nd call 완전 제거 — motion_sequence를 룩업 테이블로 교체**
+
+2nd call이 생성하는 것: `motion_sequence`(리스트), `tension_level`(float).
+이 값들은 이미 알고 있는 감정 타입으로 결정 가능. LLM 불필요.
+
+신규 파일 `backend/services/motion_lookup.py` 작성:
+
+```python
+"""감정 → 모션/텐션 룩업 테이블. LLM 호출 없이 결정론적으로 반환."""
+
+EMOTION_MOTION_MAP: dict[str, list[str]] = {
+    "HAPPY":        ["bounce", "wave"],
+    "CONCERNED":    ["lean_forward", "tilt_head"],
+    "EXCITED":      ["jump", "spin"],
+    "CURIOUS":      ["tilt_head", "look_around"],
+    "AFFECTIONATE": ["nod", "smile"],
+    "IDLE":         ["idle_sway"],
+}
+
+EMOTION_TENSION_MAP: dict[str, float] = {
+    "HAPPY":        0.7,
+    "CONCERNED":    1.0,
+    "EXCITED":      0.9,
+    "CURIOUS":      0.6,
+    "AFFECTIONATE": 0.5,
+    "IDLE":         0.3,
+}
+
+def get_motion_data(emotion: str, intensity: float) -> dict:
+    """emotion + intensity로 motion_sequence, tension_level을 반환한다."""
+    motions = EMOTION_MOTION_MAP.get(emotion, EMOTION_MOTION_MAP["IDLE"])
+    base_tension = EMOTION_TENSION_MAP.get(emotion, 0.5)
+    return {
+        "motion_sequence": motions,
+        "tension_level":   round(base_tension * intensity, 2),
+    }
+```
+
+`chat_pipeline.py` `_background_process`에서:
+```python
+# 기존: internal = await llm_router.call_for_json(...)
+# 교체:
+from backend.services.motion_lookup import get_motion_data
+internal = get_motion_data(parsed.emotion, parsed.intensity)
+```
+
+양방향 고려: 프론트는 emotion_update SSE에서 `motion_sequence`, `tension_level`을 받아 씀.
+기존과 동일한 키/타입 유지 필수. 리스트와 float 타입 변경 없음.
+
+**2. llm_router에 call_for_text_worker() 추가**
+
+```python
+# llm_router.py
+async def call_for_text_worker(
+    self,
+    messages: list[dict],
+    system_prompt: str = "",
+) -> str:
+    """백그라운드 경량 작업용. OLLAMA_WORKER_MODEL(기본: qwen3:4b) 사용."""
+    import os
+    worker_model = os.getenv("OLLAMA_WORKER_MODEL", "qwen3:4b")
+    # 내부적으로 _call_ollama_text(model=worker_model) 호출
+    # source가 ollama가 아닌 경우(openai 등)에는 call_for_text() 위임
+    ...
+```
+
+**3. 백그라운드 태스크 → worker 모델로 교체**
+
+- `score_tasks.py`: `llm_router.call_for_text()` → `llm_router.call_for_text_worker()`
+- `memory_tasks.py`: 세션 요약 호출 → `call_for_text_worker()`
+- `diary_tasks.py`: 일기 작성 → `call_for_text_worker()`
+- `decay_tasks.py`: 휘발 메모리 압축 → `call_for_text_worker()`
+
+**4. API 모드 감지 시 자동 채점 skip**
+
+```python
+# score_tasks.py
+if llm_router.source in ("openai", "anthropic"):
+    logger.info("API 모드 감지: 자동 채점 skip (비용 절감)")
+    return {"message_id": message_id, "auto_score": None, "skipped": True}
+```
+
+#### 자동 채점 신뢰도 문제 (함께 해결)
+- 의도는 4B 모델 채점이었으나 실제로는 14B가 채점 중 (worker 분리 전)
+- qwen3 계열 think:false 시 판단력 저하 → 채점 결과가 노이즈일 가능성
+- 이 노이즈 데이터가 파인튜닝 데이터셋으로 누적되는 문제
+- worker 모델 분리 후에도 채점 결과를 파인튜닝 필터로만 쓰고, 오너 명시 피드백(👍👎)을 우선 신뢰하도록 가중치 유지 (기존 final_score 공식에서 explicit 0.4 비중이 이미 반영됨)
+
+#### 작업 순서
+1. `backend/services/motion_lookup.py` 신규 작성
+2. `chat_pipeline.py` `_background_process`: 2nd call 제거, `get_motion_data()` 호출로 교체
+3. `llm_router.py`: `call_for_text_worker()` 메서드 추가
+4. `score_tasks.py`, `memory_tasks.py`, `diary_tasks.py`, `decay_tasks.py`: worker 메서드로 교체
+5. `score_tasks.py`: API 모드 skip 처리 추가
+6. 검증: 채팅 후 로그에서 "Ollama connection" 로그 횟수 1회인지 확인
+
+#### 완료 기준
+- 대화 1회당 메인 모델 Ollama 호출 1회
+- 채점/요약/일기가 qwen3:4b 모델로 실행됨 (로그에서 모델명 확인)
+- emotion_update SSE 이벤트에 motion_sequence/tension_level 정상 포함
+
+---
+
+### [SPEC-05] 무드 이중 업데이트 제거
+> 스트리밍 완료 시점과 백그라운드 처리 시점 두 곳에서 set_mood()를 호출함. 두 휴리스틱이 다른 결과를 낼 때 프론트 무드가 순간 뒤집힘 (UI jitter).
+
+#### 문제
+
+```
+스트리밍 완료:  detect_mood_from_text() → set_mood() → done 이벤트에 mood 포함
+                                                              ↓
+백그라운드:     parse_response() → set_mood() → emotion_update SSE
+```
+
+두 함수(`detect_mood_from_text`, `parse_response`)가 동일 수준의 휴리스틱을 사용하지만 결과가 다를 수 있음. 프론트에서 done 이벤트 → emotion_update SSE 순서로 두 번 무드가 바뀜.
+
+#### 해결 방안
+
+**스트리밍 측 set_mood() 제거. done 이벤트의 mood → "PENDING"으로 변경.**
+
+```python
+# chat_pipeline.py 수정
+# 기존:
+# detected_mood = detect_mood_from_text(full_text)
+# set_mood(detected_mood)
+# done_event = {"type": "done", ..., "mood": detected_mood}
+
+# 변경:
+done_event = {
+    "type":            "done",
+    "message_id":      assistant_msg_id,
+    "conversation_id": cid,
+    "mood":            "PENDING",  # 백그라운드에서 최종 결정
+}
+```
+
+백그라운드 `_background_process`에서 parse_response → set_mood → emotion_update SSE가 유일한 무드 업데이트 경로가 됨.
+
+양방향 고려: 프론트는 done 이벤트의 `mood` 값을 읽어서 즉시 무드를 바꿀 수 있음.
+- `mood === "PENDING"` 수신 시 → 캐릭터 무드 변경하지 않고 emotion_update SSE 대기
+- API_CONTRACT.md에 `"mood": "PENDING"` 동작 명시 필요
+
+messages 테이블 저장: `_save_message` 호출 시 `mood=None` (NULL 저장), 백그라운드 완료 후 UPDATE:
+
+```python
+# _background_process에서 parse_response 후:
+await _update_message_mood(assistant_msg_id, new_mood)  # 신규 헬퍼
+```
+
+```python
+async def _update_message_mood(message_id: str, mood: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE messages SET mood_at_response = ? WHERE id = ?",
+            (mood, message_id),
+        )
+        await db.commit()
+```
+
+#### 작업 순서
+1. `chat_pipeline.py`: `detect_mood_from_text` 호출 + `set_mood()` 제거
+2. `chat_pipeline.py`: done 이벤트 `mood` → `"PENDING"`
+3. `chat_pipeline.py`: `_save_message` 호출 시 `mood=None`
+4. `chat_pipeline.py`: `_update_message_mood()` 헬퍼 추가
+5. `chat_pipeline.py`: `_background_process`에서 `_update_message_mood()` 호출
+6. `API_CONTRACT.md`: done 이벤트 `mood` 필드에 `"PENDING"` 케이스 명시
+7. 프론트: `mood === "PENDING"` 처리 추가 (무드 변경 보류, emotion_update 대기)
+8. 검증: 채팅 후 logs에서 set_mood 로그 대화당 1회만 나타나는지 확인
+
+#### 완료 기준
+- 응답 후 무드가 두 번 바뀌지 않음
+- emotion_update SSE 대화당 1회만 발생
+- messages.mood_at_response가 NULL → 백그라운드 완료 후 실제 값으로 채워짐
+
+---
+
 ## 🔵 Claude Code 상태 (백엔드 + 프론트엔드 전담)
 > 이 섹션은 Claude Code만 수정합니다.
 
@@ -73,46 +700,17 @@ Input
 
 ---
 
-## ⚠️ 당장 해야 할 일 (아키텍처 부채)
-> 2026-04-02 분석. 기능은 동작하지만 API 모드 전환 시 과금 폭탄 및 품질 저하 발생.
+## ⚠️ 당장 해야 할 일
+> 아래 항목들은 🛠️ 유지보수 명세서로 이동됨. 해당 SPEC에서 구체적 해결 방안 확인.
 
-### [HIGH] LLM 다중 호출 — API 모드 전환 시 과금 폭탄
-현재 대화 1회당 동일 모델(메인 챗 모델)을 최대 3번 호출함.
-**API 모드(GPT-4o/Gemini)로 전환하면 토큰 비용 3배.**
-
-| 호출 | 위치 | 모델 | 실제로 필요한가? |
-|------|------|------|-----------------|
-| 1st: 메인 응답 스트리밍 | chat_pipeline.py | 메인 모델 | ✅ 필수 |
-| 2nd: 내부 상태 JSON (motion_sequence 등) | chat_pipeline.py `_background_process` | 메인 모델 | ❌ 룩업 테이블로 교체 가능 |
-| 3rd: 응답 품질 자동 채점 | tasks/score_tasks.py | 메인 모델 | ❌ API 모드 시 비활성화 필요 |
-
-추가 발견된 백그라운드 LLM 호출 (모두 메인 모델 사용):
-- `memory_tasks.py`: 세션 종료 시 대화 요약
-- `diary_tasks.py`: 매일 자정 일기 작성
-- `decay_tasks.py`: 휘발 메모리 압축 (7일 이상)
-- `routers/settings.py`: 페르소나 프리뷰 3회 연속 호출
-
-**근본 문제:** `OLLAMA_WORKER_MODEL` 환경변수가 있지만 `llm_router`가 이를 전혀 사용하지 않음.
-백그라운드 작업 전부 `get_current_chat_model()` → 메인 모델 그대로 사용.
-
-**해결 방향:**
-1. `llm_router`에 `stream_worker()` 메서드 추가 → `OLLAMA_WORKER_MODEL` 사용
-2. 2nd call (motion_sequence) → 감정 기반 룩업 테이블로 교체 (LLM 제거)
-3. 백그라운드 태스크들(채점/요약/일기/압축) → `stream_worker()` 사용
-4. API 모드 감지 시 자동 채점 Celery 태스크 skip 처리
-
-### [MEDIUM] 자동 채점 신뢰도 문제
-- 4B 워커 모델 의도였으나 실제로는 메인 모델(14B)이 채점 중
-- qwen3 계열은 think:false 시 판단력 저하 → 채점 결과가 노이즈 수준일 가능성
-- 이 데이터가 파인튜닝 데이터셋(hana_dataset_message)에 누적됨
-- **저품질 채점 데이터 → 저품질 파인튜닝 → 모델 성능 저하 우려**
-- 해결: 자동 채점 제거 or 오너 명시 피드백(👍👎)만 신뢰
-
-### [LOW] 무드 이중 업데이트 (UI jitter)
-- 스트리밍 끝: `detect_mood_from_text` (휴리스틱) → `done` 이벤트
-- 백그라운드: `parse_response` (동일 수준 휴리스틱) → `emotion_update` SSE
-- 두 값이 다르면 프론트 무드가 순간 뒤집힘
-- 해결: 스트리밍 측 `set_mood()` 제거, 백그라운드 단일 경로로 통일
+| 항목 | SPEC | 우선순위 |
+|------|------|----------|
+| LLM 다중 호출 (대화당 3회 → 1회) | SPEC-04 | HIGH |
+| 메모리 검색이 SQLite LIKE라 "안녕" 검색 시 0개 반환 | SPEC-02 | HIGH |
+| 페르소나 프리셋 dead code | SPEC-01 | HIGH |
+| 자동 채점 worker 모델 분리 | SPEC-04 | MEDIUM |
+| 컨텍스트 파이프라인 무결성 (preference 조용한 실패 등) | SPEC-03 | MEDIUM |
+| 무드 이중 업데이트 UI jitter | SPEC-05 | LOW |
 
 ---
 
