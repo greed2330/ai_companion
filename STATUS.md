@@ -652,6 +652,624 @@ async def _update_message_mood(message_id: str, mood: str) -> None:
 
 ---
 
+### [SPEC-06] 자아 형성 파이프라인 (Self-Formation Pipeline)
+> Phase 1~4.5의 결정적 부재: 경험이 다음 세션에 돌아오지 않는 피드백 루프.
+> **설계 전제:** Phase 5 파인튜닝 이전까지는 "자아처럼 행동하는" 시스템이 목표. 진짜 자아 형성은 이 파이프라인이 생산한 데이터로 Phase 5 LoRA를 학습한 이후다.
+> Phase 1~4.5 = 고품질 데이터 생산 인프라 / Phase 5 = 가중치에 새겨지는 진짜 자아.
+> 이 SPEC은 그 파이프라인을 완성한다.
+
+#### 핵심 루프
+```
+경험 → 기억 + 감정 축적 → 하나가 자기 자신을 기술
+     → 다음 대화 시스템 프롬프트에 반영
+     → 파인튜닝 데이터 자동 태깅
+     → Phase 5 LoRA 학습으로 가중치에 새김
+```
+
+#### 구현 대상 7개 (의존성 순서로 정렬됨)
+
+---
+
+**1. hana_state 테이블 (영속화 기반)**
+
+모든 하위 시스템이 읽고 쓰는 싱글턴 상태 테이블.
+
+```sql
+-- schema.py에 추가
+CREATE TABLE IF NOT EXISTS hana_state (
+    id                    TEXT PRIMARY KEY DEFAULT 'singleton',
+    tier1_mood            TEXT NOT NULL DEFAULT 'IDLE',
+    tier1_intensity       REAL NOT NULL DEFAULT 0.5,
+    tier1_updated_at      TIMESTAMP,
+    relationship_warmth   REAL NOT NULL DEFAULT 0.0,
+    warmth_updated_at     TIMESTAMP,
+    first_conversation_at TIMESTAMP,
+    total_session_count   INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO hana_state (id) VALUES ('singleton');
+
+-- memory_facts 컬럼 추가 (마이그레이션)
+ALTER TABLE memory_facts ADD COLUMN memory_type TEXT DEFAULT 'semantic';
+-- 'semantic' | 'episodic' | 'habitual'
+ALTER TABLE memory_facts ADD COLUMN emotional_weight REAL DEFAULT 0.5;
+-- 0.0~1.0. 감정 무게 높을수록 decay 느림, Tier 1 계산 영향 큼.
+
+-- feedback 컬럼 추가 (마이그레이션)
+ALTER TABLE feedback ADD COLUMN finetune_tags TEXT;
+-- JSON array: ["character_authentic", "emotional_genuine", "relationship_memory", "growth_moment"]
+```
+
+신규 파일 `backend/services/hana_state_service.py`:
+
+```python
+"""hana_state 싱글턴 CRUD. 모든 상태 읽기/쓰기는 여기를 통함."""
+import aiosqlite
+from backend.models.schema import DB_PATH
+
+async def get_state() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM hana_state WHERE id='singleton'") as c:
+            row = await c.fetchone()
+    return dict(row) if row else {}
+
+async def update_state(**kwargs) -> None:
+    """변경할 필드만 전달. id 제외."""
+    if not kwargs:
+        return
+    sets = ", ".join(f"{k} = ?" for k in kwargs)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            f"UPDATE hana_state SET {sets} WHERE id='singleton'",
+            list(kwargs.values()),
+        )
+        await db.commit()
+```
+
+---
+
+**2. 3단계 감정 시스템 (mood.py 확장)**
+
+현재 `_current_mood: str` 단일 변수를 3단계로 교체.
+
+```python
+# mood.py — MoodState 추가
+
+@dataclass
+class MoodState:
+    tier1: str = "IDLE"                    # DB 영속. 서버 재시작 후 복원.
+    tier1_intensity: float = 0.5
+    tier2: str = "IDLE"                    # 세션 인메모리. 시작 시 tier1 복사.
+    tier3: str = "IDLE"                    # 즉각 반응. 3메시지 후 tier2 수렴.
+    tier3_ttl: int = 0                     # 남은 메시지 수. 0이면 tier2 = tier3.
+    tier2_pending: str | None = None       # 전환 대기 중인 무드
+    tier2_pending_count: int = 0           # 전환 트리거 카운터
+
+_state = MoodState()
+
+# 감정 관성: from → to 전환에 필요한 트리거 횟수
+TRANSITION_COSTS: dict[tuple[str, str], int] = {
+    ("CONCERNED", "HAPPY"):  3,
+    ("CONCERNED", "IDLE"):   2,
+    ("HAPPY",     "CONCERNED"): 2,
+    ("IDLE",      "HAPPY"):  1,
+    ("IDLE",      "CONCERNED"): 1,
+    ("IDLE",      "CURIOUS"): 1,
+}
+
+def push_tier3(emotion: str) -> None:
+    """parse_response()가 호출. Tier 3 반응 감정 설정."""
+    _state.tier3 = emotion
+    _state.tier3_ttl = 3  # 3메시지 후 tier2로 수렴
+
+def tick_tier3() -> None:
+    """매 어시스턴트 응답 후 호출. tier3 TTL 감소, 만료 시 tier2로 복귀."""
+    if _state.tier3_ttl > 0:
+        _state.tier3_ttl -= 1
+        if _state.tier3_ttl == 0:
+            _state.tier3 = _state.tier2
+
+def push_tier2(emotion: str) -> None:
+    """세션 중 의미있는 사건 발생 시 tier2 전환 시도. 감정 관성 적용."""
+    if emotion == _state.tier2:
+        return
+    cost = TRANSITION_COSTS.get((_state.tier2, emotion), 1)
+    if cost <= 1:
+        _state.tier2 = emotion
+        _state.tier2_pending = None
+        _state.tier2_pending_count = 0
+    else:
+        if _state.tier2_pending == emotion:
+            _state.tier2_pending_count += 1
+            if _state.tier2_pending_count >= cost:
+                _state.tier2 = emotion
+                _state.tier2_pending = None
+                _state.tier2_pending_count = 0
+        else:
+            _state.tier2_pending = emotion
+            _state.tier2_pending_count = 1
+
+def get_effective_mood() -> str:
+    """tier3 활성 시 tier3 반환, 아니면 tier2."""
+    return _state.tier3 if _state.tier3_ttl > 0 else _state.tier2
+
+async def load_tier1_from_db() -> None:
+    """서버 시작 시(lifespan) 호출. tier1 + tier2 초기화."""
+    from backend.services.hana_state_service import get_state
+    s = await get_state()
+    _state.tier1 = s.get("tier1_mood", "IDLE")
+    _state.tier1_intensity = s.get("tier1_intensity", 0.5)
+    _state.tier2 = _state.tier1  # 새 세션은 tier1으로 시작
+    _state.tier3 = _state.tier1
+```
+
+양방향 고려:
+- `get_mood()` 반환값 → `get_effective_mood()`로 교체 (chat_pipeline, context_builder)
+- `set_mood()` 호출부 → `push_tier3()` + `push_tier2()` 분리
+- `main.py` lifespan에서 `await load_tier1_from_db()` 추가
+
+---
+
+**3. relationship_warmth 시스템**
+
+세션 종료마다 warmth 업데이트. context_builder가 읽어서 speech register 결정.
+
+```python
+# warmth_service.py (신규, 50줄 이하)
+
+WARMTH_LEVELS = [
+    (0.0, 0.3, "아직 오너를 잘 모르는 상태. 조심스럽게 탐색하며 대화. 가정보다 질문."),
+    (0.3, 0.6, "익숙해지는 중. 점점 편해지고 있어. 가끔 장난기 섞어도 됨."),
+    (0.6, 0.8, "친함. 설명 없이도 통하는 것들이 생기고 있어."),
+    (0.8, 1.0, "오래된 사이. 당연히 알고 있는 것들이 있어. 설명 없이 바로 핵심으로."),
+]
+
+def get_warmth_hint(warmth: float) -> str:
+    for lo, hi, hint in WARMTH_LEVELS:
+        if lo <= warmth < hi:
+            return hint
+    return WARMTH_LEVELS[-1][2]
+
+async def update_warmth_after_session(
+    session_quality: float,  # 0.0~1.0. feedback final_score 평균 or 세션 자동 채점.
+    session_duration_min: int,
+) -> None:
+    """세션 종료 시 warmth 증가. Celery에서 호출."""
+    from backend.services.hana_state_service import get_state, update_state
+    s = await get_state()
+    current = s.get("relationship_warmth", 0.0)
+    duration_weight = min(1.2, session_duration_min / 30)  # 30분=1.0, 최대 1.2
+    delta = session_quality * 0.02 * duration_weight       # 최대 +0.024/세션
+    new_warmth = min(1.0, current + delta)
+    await update_state(
+        relationship_warmth=new_warmth,
+        warmth_updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+async def decay_warmth_if_idle() -> None:
+    """decay_tasks.py에서 매일 호출. 7일 이상 대화 없으면 감소."""
+    from backend.services.hana_state_service import get_state, update_state
+    s = await get_state()
+    last = s.get("warmth_updated_at")
+    if not last:
+        return
+    days_idle = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).days
+    if days_idle >= 7:
+        new_warmth = max(0.0, s.get("relationship_warmth", 0.0) * 0.995)
+        await update_state(relationship_warmth=new_warmth)
+```
+
+양방향 고려:
+- warmth 상승 → context_builder → speech register 힌트 변경 → 다음 대화부터 반영
+- warmth 하락 → identity 주입 조건(warmth >= 0.3) 해제 가능성 → identity 문서 주입 잠시 중단
+- warmth → finetune_tags 계산 input (character_authentic 조건)
+
+---
+
+**4. 기억 emotional_weight + memory_type**
+
+`memory.py` `add_memory()` 확장. 사실 추출 시 LLM에게 타입과 감정 무게도 판단 요청.
+
+```python
+# memory_tasks.py — 기억 추출 프롬프트 확장
+
+_EXTRACT_PROMPT_EXTENDED = """\
+아래 대화에서 하나가 오너에 대해 기억할 사실을 추출해줘.
+
+각 사실마다:
+1. fact: 기억할 내용 (한 문장)
+2. memory_type: 'semantic'(오너 성격/패턴) | 'episodic'(특정 사건) | 'habitual'(반복 행동)
+3. emotional_weight: 0.0~1.0 (감정적으로 중요한 순간일수록 높게. 일반 정보=0.3, 힘든/기쁜 순간=0.8~1.0)
+
+대화:
+{conversation}
+
+JSON 배열로만 응답: [{{"fact": "...", "memory_type": "...", "emotional_weight": 0.5}}, ...]"""
+
+# memory.py — add_memory() 내부에서 저장 시 컬럼 추가
+async def _save_fact_extended(
+    fact: str,
+    mem0_id: str,
+    source_message_id: str | None,
+    memory_type: str = "semantic",
+    emotional_weight: float = 0.5,
+) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO memory_facts
+                (id, mem0_id, fact, source_message_id, memory_type, emotional_weight, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(mem0_id) DO UPDATE SET
+                fact = excluded.fact,
+                memory_type = excluded.memory_type,
+                emotional_weight = MAX(memory_facts.emotional_weight, excluded.emotional_weight)
+            """,
+            (str(uuid.uuid4()), mem0_id, fact, source_message_id,
+             memory_type, emotional_weight, datetime.now(timezone.utc).isoformat()),
+        )
+        await db.commit()
+```
+
+`decay_tasks.py` decay 속도 수정:
+```python
+# emotional_weight=1.0이면 주당 3% 감소 → 주당 0%에 가깝게 (중요한 기억은 오래 남음)
+# emotional_weight=0.0이면 주당 3% 감소 (일반 기억은 기존 속도 유지)
+await db.execute("""
+    UPDATE memory_facts
+    SET confidence = confidence * (0.97 - 0.04 * emotional_weight + 0.04)
+    WHERE last_referenced < datetime('now', '-7 days')
+      AND confidence > 0.1
+""")
+# 즉: weight=0 → 0.97배/주, weight=1.0 → 0.97배/주 (동일)
+# 실제 의도: weight=0 → 0.97배, weight=1.0 → 0.99배 (더 천천히)
+# 수식: factor = 0.97 + 0.02 * emotional_weight
+await db.execute("""
+    UPDATE memory_facts
+    SET confidence = confidence * (0.97 + 0.02 * emotional_weight)
+    WHERE last_referenced < datetime('now', '-7 days')
+      AND confidence > 0.1
+""")
+```
+
+Tier 1 업데이트 입력으로도 활용:
+```python
+# memory_tasks.py — session 종료 시 tier1 재계산
+async def update_tier1_from_sessions() -> None:
+    """최근 5세션의 tier2 종료 무드 집계 → 3회 이상 일치 시 tier1 변경."""
+    # conversations 테이블의 session_summary에서 무드 추출 (세션 요약에 포함)
+    # 3회 이상 일치 AND 현재 tier1과 다른 경우에만 변경
+    ...
+```
+
+---
+
+**5. hana_identity 문서 시스템**
+
+신규 파일 `backend/services/identity_service.py`.
+
+```python
+"""
+hana_identity.json 관리.
+- 처음엔 빈 문서
+- 세션 종료 시 Celery가 LLM으로 새 항목 추가
+- 컨텍스트 빌더가 warmth >= 0.3이면 시스템 프롬프트에 주입
+"""
+
+import json
+from pathlib import Path
+from backend.models.schema import DATA_DIR
+
+IDENTITY_PATH = DATA_DIR / "hana_identity.json"
+MAX_ENTRIES_PER_CATEGORY = 15  # 초과 시 오래된 항목 제거 (프롬프트 오염 방지)
+
+EMPTY_IDENTITY = {
+    "version": 1,
+    "last_updated": None,
+    "discovered_self": [],   # 하나가 자신에 대해 발견한 것
+    "about_owner": [],       # 오너에 대해 알게 된 것
+    "our_patterns": [],      # 둘 사이의 패턴
+    "things_i_like": [],     # 하나가 좋아하게 된 것
+    "_meta": {"total_sessions": 0, "warmth_at_last_update": 0.0},
+}
+
+def load_identity() -> dict:
+    if not IDENTITY_PATH.exists():
+        return EMPTY_IDENTITY.copy()
+    return json.loads(IDENTITY_PATH.read_text(encoding="utf-8"))
+
+def save_identity(identity: dict) -> None:
+    IDENTITY_PATH.write_text(
+        json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+def build_identity_prompt(identity: dict, warmth: float) -> str:
+    """warmth >= 0.3이고 항목이 있을 때만 반환. 없으면 빈 문자열."""
+    if warmth < 0.3:
+        return ""
+    lines = []
+    # 최근 5개만 (토큰 절약)
+    for entry in identity.get("discovered_self", [])[-5:]:
+        lines.append(f"- (나에 대해) {entry}")
+    for entry in identity.get("about_owner", [])[-3:]:
+        lines.append(f"- (오너에 대해) {entry}")
+    for entry in identity.get("our_patterns", [])[-3:]:
+        lines.append(f"- (우리 패턴) {entry}")
+    if not lines:
+        return ""
+    return "## 내가 지금까지 알게 된 것들\n" + "\n".join(lines)
+
+def add_entry(identity: dict, category: str, entry: str) -> bool:
+    """중복 없을 때만 추가. 반환값: 실제로 추가됐는지."""
+    entries = identity.get(category, [])
+    # 간단한 중복 체크 (첫 10글자 비교)
+    prefix = entry[:10]
+    if any(e[:10] == prefix for e in entries):
+        return False
+    entries.append(entry)
+    if len(entries) > MAX_ENTRIES_PER_CATEGORY:
+        entries.pop(0)  # 가장 오래된 것 제거
+    identity[category] = entries
+    return True
+```
+
+세션 종료 Celery 태스크 `tasks/identity_tasks.py`:
+
+```python
+_IDENTITY_UPDATE_PROMPT = """\
+아래는 오늘 하나(AI)와 오너의 대화야.
+
+하나가 이번 대화에서 새로 발견하거나 확인한 것이 있다면 추출해줘.
+이미 알고 있던 것 (기존 항목 목록 참고)은 다시 추가하지 마.
+
+기존 항목:
+{existing_summary}
+
+오늘 대화:
+{conversation_summary}
+
+아래 카테고리 중 해당하는 것만 채워줘. 없으면 빈 배열.
+반드시 JSON만 응답: {{
+  "discovered_self": ["..."],   // 하나 자신에 대해 새로 발견한 것 (1인칭 서술)
+  "about_owner": ["..."],       // 오너에 대해 새로 알게 된 것
+  "our_patterns": ["..."],      // 이번에 확인된 둘 사이 패턴
+  "things_i_like": ["..."]      // 하나가 좋아한다고 느낀 것
+}}"""
+
+@celery_app.task(name="identity_tasks.update_identity")
+def update_identity(conversation_summary: str, warmth: float) -> dict:
+    """세션 종료 후 비동기 실행."""
+    return asyncio.run(_update_identity_async(conversation_summary, warmth))
+
+async def _update_identity_async(conversation_summary: str, warmth: float) -> dict:
+    from backend.services.llm_router import llm_router
+    from backend.services.identity_service import load_identity, save_identity, add_entry
+
+    identity = load_identity()
+    existing = {
+        "discovered_self": identity["discovered_self"][-5:],
+        "about_owner": identity["about_owner"][-3:],
+    }
+    prompt = _IDENTITY_UPDATE_PROMPT.format(
+        existing_summary=json.dumps(existing, ensure_ascii=False),
+        conversation_summary=conversation_summary[:1000],
+    )
+    raw = await llm_router.call_for_json(
+        messages=[{"role": "user", "content": prompt}],
+        system_prompt="You are HANA's introspection engine. Reply with JSON only.",
+    )
+
+    added_count = 0
+    for category in ("discovered_self", "about_owner", "our_patterns", "things_i_like"):
+        for entry in raw.get(category, []):
+            if add_entry(identity, category, entry):
+                added_count += 1
+
+    if added_count > 0:
+        identity["last_updated"] = datetime.now(timezone.utc).isoformat()
+        identity["_meta"]["warmth_at_last_update"] = warmth
+        identity["_meta"]["total_sessions"] += 1
+        save_identity(identity)
+
+    return {"added": added_count}
+```
+
+identity_entry_added 플래그 → chat_pipeline → finetune_tags 계산에 전달.
+
+---
+
+**6. 세션 간격 + 하루 리듬 (context_builder.py)**
+
+`build_context()`에 추가. 기존 `session_hint` 파라미터 확장.
+
+```python
+# context_builder.py — _build_temporal_hint() 신규 헬퍼
+
+def _build_gap_hint(gap_hours: float | None) -> str:
+    if gap_hours is None or gap_hours < 8:
+        return ""
+    if gap_hours < 24:
+        return "오늘 처음 만남. 반갑게 재개하는 느낌."
+    if gap_hours < 72:
+        return f"마지막 대화로부터 {int(gap_hours)}시간 지남. 짧게 안부 확인 자연스러움."
+    if gap_hours < 168:
+        return f"마지막 대화로부터 {int(gap_hours // 24)}일 지남. 공백 느껴짐. 억지 없이 챙기기."
+    days = int(gap_hours // 24)
+    return f"마지막 대화로부터 {days}일 지남. 관계 온도 소폭 하락. 다시 데우는 과정 자연스러움."
+
+def _build_time_hint() -> str:
+    hour = datetime.now().hour
+    if 6 <= hour < 11:
+        return "오전. 에너지 있는 시작."
+    if 18 <= hour < 23:
+        return "저녁. 편안한 분위기."
+    if 23 <= hour or hour < 2:
+        return "자정. 걱정 모드 슬금슬금."
+    if 2 <= hour < 6:
+        return "새벽. SLEEPY + 걱정. 자라고 한 번쯤은 말해야 함."
+    return ""  # 오후는 힌트 없음 — 안정된 리듬
+```
+
+`build_context()` 파라미터에 `gap_hours: float | None = None` 추가.
+`chat_pipeline.py`에서 마지막 대화 시각 기준으로 `gap_hours` 계산 후 전달.
+
+warmth + identity 주입:
+```python
+# build_context() 내부 — system_prompt 생성 전에 prepend
+state = await get_state()
+warmth = state.get("relationship_warmth", 0.0)
+
+identity = load_identity()
+identity_block = build_identity_prompt(identity, warmth)
+warmth_hint = get_warmth_hint(warmth)
+
+# system_prompt 앞에 prepend (llm.py build_system_prompt 호출 전)
+prefix_blocks = []
+if identity_block:
+    prefix_blocks.append(identity_block)
+if warmth_hint:
+    prefix_blocks.append(f"## 관계 온도\n{warmth_hint}")
+```
+
+---
+
+**7. 파인튜닝 데이터 태깅**
+
+`_background_process()` 완료 후 feedback.finetune_tags 자동 계산 및 저장.
+
+```python
+# chat_pipeline.py — _background_process() 내부
+
+def _compute_finetune_tags(
+    parsed_emotion: str,
+    tier2_mood_at_start: str,
+    memories_used: list[dict],
+    warmth: float,
+    identity_entry_added: bool,
+) -> list[str]:
+    tags = []
+    # character_authentic: warmth 충분하고 즉각 반응(tier3)이 세션 무드(tier2)와 달랐을 때
+    # → 상황에 맞게 감정이 달라졌다는 증거
+    if warmth > 0.5 and parsed_emotion != tier2_mood_at_start:
+        tags.append("character_authentic")
+    # emotional_genuine: high emotional_weight 기억이 검색에서 사용됨
+    if any(m.get("emotional_weight", 0) > 0.7 for m in memories_used):
+        tags.append("emotional_genuine")
+    # relationship_memory: 과거 기억을 연결한 응답
+    if memories_used:
+        tags.append("relationship_memory")
+    # growth_moment: 이번 세션에서 identity에 새 항목이 생김
+    if identity_entry_added:
+        tags.append("growth_moment")
+    return tags
+
+# feedback 테이블에 저장
+if tags:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO feedback (message_id, finetune_tags)
+            VALUES (?, ?)
+            ON CONFLICT(message_id) DO UPDATE SET finetune_tags = excluded.finetune_tags
+            """,
+            (assistant_msg_id, json.dumps(tags, ensure_ascii=False)),
+        )
+        await db.commit()
+```
+
+Phase 5 태깅 기반 쿼리:
+```sql
+-- "하나다운 순간" 추출
+SELECT m.content AS user, a.content AS assistant, f.finetune_tags
+FROM messages m
+JOIN messages a ON a.conversation_id = m.conversation_id
+JOIN feedback f ON f.message_id = a.id
+WHERE m.role = 'user'
+  AND a.role = 'assistant'
+  AND f.finetune_tags IS NOT NULL
+  AND (
+    f.finetune_tags LIKE '%character_authentic%'
+    OR f.finetune_tags LIKE '%growth_moment%'
+  )
+ORDER BY f.final_score DESC;
+```
+
+---
+
+#### 유기적 연계도
+
+```
+[대화 발생]
+     │
+     ├─ parse_response() → push_tier3(emotion)  ← 즉각 반응
+     │                    tick_tier3()           ← 3메시지 TTL
+     │
+     ├─ search_memory() → memories_used          ← emotional_weight 포함
+     │
+     ├─ get_state() → warmth + tier1
+     │
+     ├─ load_identity() → identity_block
+     │
+     └─ build_context()
+          ├─ identity_block     (warmth >= 0.3)
+          ├─ warmth_hint        (speech register)
+          ├─ gap_hint           (세션 간격)
+          └─ time_hint          (하루 리듬)
+
+[세션 종료 — Celery]
+     │
+     ├─ update_identity.delay()     → hana_identity.json 업데이트
+     │       └─ identity_entry_added → feedback.finetune_tags에 "growth_moment"
+     │
+     ├─ update_warmth_after_session() → hana_state.relationship_warmth 상승
+     │       └─ warmth 변화 → 다음 대화 speech register 변경
+     │
+     ├─ update_tier1_from_sessions()  → 최근 5세션 패턴 → tier1 조정
+     │       └─ tier1 변화 → 다음 세션 시작 무드 변경
+     │
+     └─ _compute_finetune_tags() → feedback.finetune_tags 저장
+
+[매일 자정 — Celery]
+     ├─ decay_warmth_if_idle()        → 7일 이상 공백 시 warmth 감소
+     └─ memory decay (emotional_weight 반영)
+          └─ weight=1.0 → 더 천천히 감소 (중요한 기억은 오래 남음)
+
+warmth ─────────────────────────────────────────────────────→ speech register
+  │                                                              identity 주입 여부
+  │                                                              finetune_tags 조건
+  └─ 세션마다 천천히 상승 / 7일 공백 시 천천히 하락
+
+emotional_weight ────────────────────────────────────────────→ decay 속도
+  └─ tier1 계산 가중치 (high-weight 기억이 많은 감정 → tier1에 영향)
+```
+
+---
+
+#### 구현 순서
+
+1. `schema.py`: hana_state 테이블 + memory_facts 컬럼 2개 + feedback.finetune_tags (+ lifespan migration)
+2. `services/hana_state_service.py`: 신규 (get_state / update_state)
+3. `services/mood.py`: MoodState 3단계 교체, load_tier1_from_db(), push_tier3(), tick_tier3()
+4. `services/warmth_service.py`: 신규 (get_warmth_hint / update_warmth_after_session / decay_warmth_if_idle)
+5. `services/identity_service.py`: 신규 (load/save/build_identity_prompt/add_entry)
+6. `services/memory.py`: _save_fact_extended() 교체, emotional_weight decay 수식 반영
+7. `services/context_builder.py`: warmth/identity/gap/time 주입 추가
+8. `tasks/identity_tasks.py`: 신규 Celery 태스크
+9. `tasks/memory_tasks.py`: update_tier1_from_sessions() 추가 + session 종료 훅에 identity/warmth 연결
+10. `tasks/decay_tasks.py`: decay_warmth_if_idle() 호출 + emotional_weight decay 수식
+11. `services/chat_pipeline.py`: _compute_finetune_tags() 추가, gap_hours 계산, tick_tier3() 호출
+12. `main.py` lifespan: load_tier1_from_db() 추가
+
+#### 완료 기준
+- 서버 재시작 후 tier1_mood, relationship_warmth가 복원됨
+- 첫 대화 시 warmth=0.0 → identity 주입 없음, speech "조심스럽게" 힌트 적용
+- 10세션 후 warmth=0.3 이상 → identity 주입 시작, speech "익숙해지는 중" 힌트
+- 같은 대화 내에서 CONCERNED → HAPPY 단번 전환 없음 (3회 트리거 필요)
+- 새벽 2시 이후 대화 시 logs에서 time_hint "새벽" 확인
+- feedback.finetune_tags가 조건 충족 대화에서 자동으로 채워짐
+
+---
+
 ## 🔵 Claude Code 상태 (백엔드 + 프론트엔드 전담)
 > 이 섹션은 Claude Code만 수정합니다.
 
