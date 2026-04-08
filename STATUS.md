@@ -1270,6 +1270,736 @@ emotional_weight ─────────────────────
 
 ---
 
+### [SPEC-07] TTS 엔진 추상화 + 목소리 설정 UI
+> 현재 `voice_output.py`는 edge-tts에 직접 결합돼 있어 엔진 교체 불가. 아키텍처 결정(2026-04-07)에서 TTSEngine을 Protocol 추상화 대상 3개 중 하나로 지정함.
+> 오너 요구사항: 설정 UI에서 엔진 선택 → 엔진별 목소리 목록 동적 표시 → 목소리 미리듣기 → WAV 파일로 커스텀 목소리 추가 (Fish Speech).
+
+#### 목표
+1. `TTSEngine` Protocol로 엔진 교체 가능한 추상화 계층 구축
+2. EdgeTTS (기본), Fish Speech (커스텀 WAV 클로닝) 구현체 제공
+3. 설정 UI 재설계: 엔진 선택 카드 → 목소리 목록 → 미리듣기 → 커스텀 업로드
+4. 선택한 엔진/목소리 `settings.json` 영속화, 서버 재시작 후 복원
+
+---
+
+#### 백엔드 상세 설계
+
+---
+
+**1. TTSEngine Protocol + 데이터클래스 (신규: `backend/services/tts_protocols.py`)**
+
+```python
+from dataclasses import dataclass, field
+from typing import Protocol, runtime_checkable
+
+@dataclass
+class VoiceInfo:
+    voice_id: str        # 엔진 내 고유 ID. "ko-KR-SunHiNeural", "hana-v1"
+    name: str            # 표시명. "선희 (여성)", "하나 커스텀 v1"
+    engine_id: str       # 소속 엔진. "edge_tts", "fish_speech"
+    gender: str          # "female" | "male" | "unknown"
+    is_custom: bool      # 사용자가 추가한 목소리
+    preview_text: str = "안녕! 나 하나야. 잘 지냈어?"
+    metadata: dict = field(default_factory=dict)
+
+@dataclass
+class EngineInfo:
+    engine_id: str
+    name: str                    # "Edge TTS (Microsoft)", "Fish Speech (로컬)"
+    description: str
+    requires_internet: bool
+    supports_custom_voice: bool  # WAV 업로드로 목소리 추가 가능
+    available: bool              # 현재 사용 가능 여부
+
+@runtime_checkable
+class TTSEngine(Protocol):
+    engine_id: str
+
+    async def synthesize(
+        self,
+        text: str,
+        voice_id: str,
+        speed: float = 1.0,
+        pitch: float = 1.0,
+        energy: float = 1.0,
+    ) -> bytes:
+        """MP3 바이트 반환."""
+        ...
+
+    async def list_voices(self) -> list[VoiceInfo]: ...
+
+    async def is_available(self) -> bool: ...
+
+    def get_info(self) -> EngineInfo: ...
+```
+
+---
+
+**2. EdgeTTS 엔진 (신규: `backend/services/tts_engines/edge_tts_engine.py`)**
+
+한국어 목소리 2개는 고정 목록. API 조회 불필요 (edge-tts 한국어 목소리가 이 2개뿐).
+`synthesize()`는 기존 `voice_output.py`의 로직을 그대로 이동.
+
+```python
+_KO_VOICES: list[VoiceInfo] = [
+    VoiceInfo(
+        voice_id="ko-KR-SunHiNeural",
+        name="선희 (여성)",
+        engine_id="edge_tts",
+        gender="female",
+        is_custom=False,
+        metadata={"locale": "ko-KR"},
+    ),
+    VoiceInfo(
+        voice_id="ko-KR-InJoonNeural",
+        name="인준 (남성)",
+        engine_id="edge_tts",
+        gender="male",
+        is_custom=False,
+        metadata={"locale": "ko-KR"},
+    ),
+]
+
+class EdgeTTSEngine:
+    engine_id = "edge_tts"
+
+    async def synthesize(self, text, voice_id, speed=1.0, pitch=1.0, energy=1.0) -> bytes:
+        import edge_tts
+        rate = _speed_to_rate(speed)   # 기존 helpers 이동
+        pitch_str = _pitch_to_hz(pitch)
+        communicate = edge_tts.Communicate(text, voice_id, rate=rate, pitch=pitch_str)
+        chunks = [c["data"] async for c in communicate.stream() if c["type"] == "audio"]
+        return b"".join(chunks)
+
+    async def list_voices(self) -> list[VoiceInfo]:
+        return _KO_VOICES
+
+    async def is_available(self) -> bool:
+        try:
+            import edge_tts
+            return True
+        except ImportError:
+            return False
+
+    def get_info(self) -> EngineInfo:
+        return EngineInfo(
+            engine_id="edge_tts",
+            name="Edge TTS (Microsoft)",
+            description="Microsoft 신경망 TTS. 인터넷 연결 필요. 별도 서버 불필요.",
+            requires_internet=True,
+            supports_custom_voice=False,
+            available=True,  # is_available()로 덮어씀
+        )
+```
+
+---
+
+**3. Fish Speech 엔진 (신규: `backend/services/tts_engines/fish_speech_engine.py`)**
+
+Fish Speech는 별도 HTTP 서버로 실행. 엔진은 해당 서버에 REST 요청을 보내는 클라이언트.
+설치/실행 방법: `https://github.com/fishaudio/fish-speech` 참고.
+환경변수: `FISH_SPEECH_URL` (기본: `http://localhost:8080`)
+
+**커스텀 목소리 파일 구조:**
+```
+data/voices/fish_speech/
+├── hana-v1/
+│   ├── voice.json      # {"name": "하나 v1", "gender": "female"}
+│   └── reference.wav   # 레퍼런스 오디오 (3~30초)
+├── hana-v2/
+│   ├── voice.json
+│   └── reference.wav
+```
+
+`list_voices()`: `data/voices/fish_speech/` 스캔 → `voice.json` + `reference.wav` 둘 다 있는 폴더만 포함.
+디렉토리 이름 = voice_id. 새 목소리 추가 → 즉시 목록 반영 (캐시 없음).
+
+`synthesize()`:
+```python
+async def synthesize(self, text, voice_id, speed=1.0, pitch=1.0, energy=1.0) -> bytes:
+    ref_path = VOICES_DIR / voice_id / "reference.wav"
+    if not ref_path.exists():
+        raise ValueError(f"Reference audio not found for voice: {voice_id}")
+    async with aiohttp.ClientSession() as session:
+        form = aiohttp.FormData()
+        form.add_field("text", text)
+        form.add_field("reference_audio", open(ref_path, "rb"), filename="reference.wav")
+        form.add_field("speed", str(speed))
+        async with session.post(f"{FISH_SPEECH_URL}/v1/tts", data=form, timeout=30) as resp:
+            resp.raise_for_status()
+            return await resp.read()  # MP3 bytes
+```
+
+`is_available()`: `GET {FISH_SPEECH_URL}/health` → 200이면 True. 타임아웃 1초.
+
+커스텀 목소리 추가/삭제:
+```python
+async def add_voice(self, audio_bytes: bytes, name: str, voice_id: str) -> VoiceInfo:
+    """voice_id = slugify(name). data/voices/fish_speech/{voice_id}/ 생성."""
+    voice_dir = VOICES_DIR / voice_id
+    voice_dir.mkdir(parents=True, exist_ok=False)  # 이미 있으면 에러
+    (voice_dir / "reference.wav").write_bytes(audio_bytes)
+    (voice_dir / "voice.json").write_text(json.dumps({"name": name, "gender": "unknown"}))
+    return VoiceInfo(voice_id=voice_id, name=name, engine_id="fish_speech", ...)
+
+async def delete_voice(self, voice_id: str) -> None:
+    """data/voices/fish_speech/{voice_id}/ 디렉토리 삭제."""
+    import shutil
+    voice_dir = VOICES_DIR / voice_id
+    if not voice_dir.exists():
+        raise ValueError(f"Voice not found: {voice_id}")
+    shutil.rmtree(voice_dir)
+```
+
+voice_id 슬러그 생성 규칙: 영숫자 + 하이픈만. 한글 이름 → 타임스탬프 기반 자동 ID (`voice-20260409-143021`).
+
+---
+
+**4. TTSRouter 싱글턴 (신규: `backend/services/tts_router.py`)**
+
+```python
+class TTSRouter:
+    """현재 선택된 엔진/목소리를 관리하고, synthesize() 호출을 위임하는 싱글턴."""
+
+    def __init__(self):
+        self._engines: dict[str, TTSEngine] = {}
+        self._current_engine_id: str = "edge_tts"
+        self._current_voice_id: str = "ko-KR-SunHiNeural"
+
+    def register(self, engine: TTSEngine) -> None:
+        self._engines[engine.engine_id] = engine
+
+    def _get_engine(self, engine_id: str | None = None) -> TTSEngine:
+        eid = engine_id or self._current_engine_id
+        if eid not in self._engines:
+            raise ValueError(f"Unknown engine: {eid}")
+        return self._engines[eid]
+
+    async def synthesize(self, text: str, speed: float, pitch: float, energy: float) -> bytes:
+        return await self._get_engine().synthesize(
+            text, self._current_voice_id, speed, pitch, energy
+        )
+
+    async def list_engines(self) -> list[EngineInfo]:
+        result = []
+        for engine in self._engines.values():
+            info = engine.get_info()
+            info.available = await engine.is_available()
+            result.append(info)
+        return result
+
+    async def list_voices(self, engine_id: str | None = None) -> list[VoiceInfo]:
+        return await self._get_engine(engine_id).list_voices()
+
+    async def set_engine(self, engine_id: str, voice_id: str | None = None) -> None:
+        engine = self._get_engine(engine_id)
+        if not await engine.is_available():
+            raise RuntimeError(f"Engine not available: {engine_id}")
+        self._current_engine_id = engine_id
+        # voice_id 미지정 시 해당 엔진의 첫 번째 목소리 자동 선택
+        voices = await engine.list_voices()
+        if voice_id and any(v.voice_id == voice_id for v in voices):
+            self._current_voice_id = voice_id
+        elif voices:
+            self._current_voice_id = voices[0].voice_id
+        # settings.json 영속화
+        from backend.services.settings_service import set_tts_settings
+        set_tts_settings(self._current_engine_id, self._current_voice_id)
+
+    def set_voice(self, voice_id: str) -> None:
+        self._current_voice_id = voice_id
+        from backend.services.settings_service import set_tts_settings
+        set_tts_settings(self._current_engine_id, self._current_voice_id)
+
+    def get_current(self) -> dict:
+        return {"engine_id": self._current_engine_id, "voice_id": self._current_voice_id}
+
+
+tts_router = TTSRouter()
+```
+
+`main.py` lifespan에서 초기화:
+```python
+async def lifespan(app):
+    # EdgeTTS 항상 등록
+    tts_router.register(EdgeTTSEngine())
+    # FishSpeech는 패키지 없어도 등록 (is_available()이 False 반환)
+    tts_router.register(FishSpeechEngine())
+    # settings.json에서 마지막 선택 복원
+    saved = settings_service.get_tts_settings()
+    tts_router._current_engine_id = saved.get("engine_id", "edge_tts")
+    tts_router._current_voice_id  = saved.get("voice_id",  "ko-KR-SunHiNeural")
+    yield
+```
+
+---
+
+**5. `voice_output.py` 수정 — tts_router 위임**
+
+기존 `synthesize()` 함수를 tts_router로 위임. edge_tts 직접 의존 제거.
+
+```python
+# backend/services/voice_output.py (전체 교체)
+from backend.services.tts_router import tts_router
+
+async def synthesize(text: str, speed: float = 1.0, pitch: float = 1.0, energy: float = 1.0) -> bytes:
+    """현재 설정된 TTS 엔진으로 합성. routers/voice.py가 이 함수를 호출."""
+    return await tts_router.synthesize(text, speed=speed, pitch=pitch, energy=energy)
+```
+
+---
+
+**6. 신규 엔드포인트 (`backend/routers/voice.py` 추가)**
+
+기존 `/voice/stt`, `/voice/tts` 유지. 아래 6개 추가.
+
+```
+GET  /voice/tts/engines
+POST /voice/tts/engines/select
+GET  /voice/tts/voices
+POST /voice/tts/preview
+POST /voice/tts/voices/upload
+DELETE /voice/tts/voices/{voice_id}
+```
+
+`/voice/tts/engines/select` 에러 케이스:
+- 등록되지 않은 engine_id → 400 `ENGINE_NOT_FOUND`
+- is_available() False → 503 `ENGINE_NOT_AVAILABLE`
+- voice_id가 해당 엔진에 없음 → 400 `VOICE_NOT_FOUND`
+
+`/voice/tts/voices/upload` 처리:
+- `engine_id != "fish_speech"` → 400 `CUSTOM_VOICE_NOT_SUPPORTED`
+- 파일 크기 > 10MB → 400 `AUDIO_TOO_LARGE`
+- 이름 충돌 → 400 `VOICE_ALREADY_EXISTS`
+- Fish Speech 서버 미실행이어도 업로드 허용 (파일만 저장, 합성은 나중에)
+
+`DELETE /voice/tts/voices/{voice_id}`:
+- is_custom=False (기본 제공 목소리) → 400 `NOT_CUSTOM_VOICE`
+- 존재하지 않음 → 404 `VOICE_NOT_FOUND`
+
+---
+
+**7. `settings_service.py` 수정**
+
+`set_tts_settings(engine_id, voice_id)` + `get_tts_settings() → dict` 추가.
+`settings.json` 내 `tts` 키로 저장:
+```json
+{
+  "persona": {...},
+  "tts": {
+    "engine_id": "edge_tts",
+    "voice_id": "ko-KR-SunHiNeural"
+  }
+}
+```
+
+---
+
+#### 프론트엔드 상세 설계
+
+---
+
+**VoicePanel 레이아웃 (위→아래)**
+
+```
+┌─ [입력 방식] ──────────────────────────────────────────┐
+│  Phase 4.5 게이트 (기존 그대로)                          │
+└────────────────────────────────────────────────────────┘
+
+┌─ [출력 방식] ──────────────────────────────────────────┐
+│  채팅창 / 말풍선 / 음성 / 말풍선+음성  (기존 그대로)       │
+└────────────────────────────────────────────────────────┘
+
+▼ 음성 출력(voice / bubble_voice) 선택 시만 표시 ▼
+
+┌─ [TTS 엔진] ───────────────────────────────────────────┐
+│                                                        │
+│  ┌──────────────────────┐  ┌──────────────────────┐   │
+│  │  ⚡ Edge TTS          │  │  🐟 Fish Speech       │   │
+│  │  Microsoft 신경망     │  │  로컬 AI 합성         │   │
+│  │  인터넷 필요          │  │  커스텀 목소리 지원   │   │
+│  │  ● 사용 가능          │  │  ○ 서버 미실행        │   │
+│  └──────────────────────┘  └──────────────────────┘   │
+│                                                        │
+└────────────────────────────────────────────────────────┘
+
+┌─ [목소리] ─────────────────────────────────────────────┐
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ ● 선희 (여성)    ko-KR-SunHiNeural    [▶ 미리듣기]│  │
+│  │ ○ 인준 (남성)    ko-KR-InJoonNeural   [▶ 미리듣기]│  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                        │
+│  ── Fish Speech 선택 시 추가 표시 ──                   │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ ○ 하나 v1        커스텀        [▶ 미리듣기]  [🗑]│  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                        │
+│  [+ 목소리 추가]  ← Fish Speech + supports_custom 시만  │
+└────────────────────────────────────────────────────────┘
+
+▼ [+ 목소리 추가] 클릭 시 인라인 확장 ▼
+
+┌─ [커스텀 목소리 추가] ─────────────────────────────────┐
+│  ┌──────────────────────────────────────────────────┐  │
+│  │   📁 WAV 또는 MP3 파일을 드래그하거나 클릭하세요  │  │
+│  │   권장: 3~30초 명확한 목소리 샘플                │  │
+│  └──────────────────────────────────────────────────┘  │
+│  목소리 이름: [____________________]                   │
+│                          [취소]  [추가하기]            │
+└────────────────────────────────────────────────────────┘
+```
+
+**엔진 카드 CSS 패턴** (기존 `.output-opt` 패턴 확장):
+```css
+.engine-card {
+  border: 1px solid var(--hana-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  flex: 1;
+}
+.engine-card.active {
+  border-color: var(--hana-accent);
+  background: rgba(124, 106, 247, 0.08);
+}
+.engine-card.unavailable {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.engine-status {           /* ● 사용 가능 / ○ 서버 미실행 */
+  font-size: 11px;
+  margin-top: 6px;
+}
+.engine-status--ok   { color: var(--hana-success); }
+.engine-status--fail { color: var(--hana-muted);   }
+```
+
+**목소리 행 CSS**:
+```css
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.voice-row:hover               { background: var(--hana-surface-2); }
+.voice-row.active              { background: rgba(124,106,247,0.1); }
+.voice-row__name               { flex: 1; font-size: 13px; }
+.voice-row__id                 { font-size: 11px; color: var(--hana-dim); }
+.voice-row__preview            { /* ▶ 미리듣기 버튼 */ }
+.voice-row__delete             { opacity: 0; transition: opacity 0.1s; color: var(--hana-danger); }
+.voice-row:hover .voice-row__delete { opacity: 1; }  /* hover 시만 삭제 버튼 노출 */
+```
+
+**미리듣기 버튼 상태 전이:**
+```
+idle   → [▶ 미리듣기]   (클릭 → loading)
+loading → [· · ·]       (API 응답 대기)
+playing → [■ 정지]      (클릭 → idle, 오디오 정지)
+error   → [✕ 실패]      (2초 후 idle 복귀)
+```
+
+미리듣기 오디오: `POST /voice/tts/preview` → `response.blob()` → `URL.createObjectURL` → `new Audio(url).play()`.
+동시에 여러 목소리 미리듣기 방지: 재생 중 다른 목소리 클릭 → 현재 재생 정지 후 새 재생.
+
+**커스텀 목소리 업로드 드래그앤드롭:**
+- `dragover`: 드롭존 border `--hana-accent` 색으로 변경
+- `drop`: 파일 타입 체크 (audio/wav, audio/mpeg, audio/mp3 만 허용)
+- 이름 입력란: placeholder "목소리 이름 (예: 하나 v1)"
+- "추가하기" 클릭 → `POST /voice/tts/voices/upload` → 성공 시 목소리 목록 즉시 갱신
+
+---
+
+**`frontend/src/hooks/useVoice.js` (신규)**
+
+```javascript
+export function useVoice() {
+  const [engines, setEngines]               = useState([]);
+  const [voices, setVoices]                 = useState([]);
+  const [currentEngineId, setCurrentEngine] = useState("edge_tts");
+  const [currentVoiceId,  setCurrentVoice]  = useState("ko-KR-SunHiNeural");
+  const [previewState, setPreviewState]     = useState({ voiceId: null, status: "idle" });
+  //                                            status: "idle"|"loading"|"playing"|"error"
+  const [uploadOpen, setUploadOpen]         = useState(false);
+  const audioRef = useRef(null);
+
+  // 마운트 시 엔진 목록 + 현재 선택 로드
+  useEffect(() => { loadEngines(); }, []);
+
+  // 엔진 변경 시 목소리 목록 자동 갱신
+  useEffect(() => { if (currentEngineId) loadVoices(currentEngineId); }, [currentEngineId]);
+
+  async function loadEngines() {
+    const data = await fetchTTSEngines();        // GET /voice/tts/engines
+    setEngines(data.engines);
+    setCurrentEngine(data.current_engine_id);
+    setCurrentVoice(data.current_voice_id);
+  }
+
+  async function loadVoices(engineId) {
+    const data = await fetchTTSVoices(engineId); // GET /voice/tts/voices?engine_id=
+    setVoices(data.voices);
+  }
+
+  async function selectEngine(engineId) {
+    await selectTTSEngine(engineId);             // POST /voice/tts/engines/select
+    setCurrentEngine(engineId);
+    // voice 자동 선택은 백엔드가 처리, 응답에서 반영
+  }
+
+  async function selectVoice(voiceId) {
+    await selectTTSVoice(voiceId);               // POST /voice/tts/engines/select {voice_id}
+    setCurrentVoice(voiceId);
+  }
+
+  async function previewVoice(voiceId) {
+    if (previewState.status === "playing") stopPreview();
+    setPreviewState({ voiceId, status: "loading" });
+    try {
+      const blob = await previewTTSVoice(voiceId, currentEngineId); // POST /voice/tts/preview
+      const url  = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      setPreviewState({ voiceId, status: "playing" });
+      audio.onended = () => { URL.revokeObjectURL(url); setPreviewState({ voiceId: null, status: "idle" }); };
+      audio.play();
+    } catch {
+      setPreviewState({ voiceId, status: "error" });
+      setTimeout(() => setPreviewState({ voiceId: null, status: "idle" }), 2000);
+    }
+  }
+
+  function stopPreview() {
+    audioRef.current?.pause();
+    audioRef.current = null;
+    setPreviewState({ voiceId: null, status: "idle" });
+  }
+
+  async function uploadVoice(file, name) {
+    const form = new FormData();
+    form.append("audio", file);
+    form.append("name", name);
+    form.append("engine_id", "fish_speech");
+    await uploadTTSVoice(form);                  // POST /voice/tts/voices/upload
+    await loadVoices("fish_speech");             // 목록 갱신
+    setUploadOpen(false);
+  }
+
+  async function deleteVoice(voiceId) {
+    await deleteTTSVoice(voiceId);               // DELETE /voice/tts/voices/{voice_id}
+    await loadVoices(currentEngineId);
+  }
+
+  return {
+    engines, voices, currentEngineId, currentVoiceId,
+    previewState, uploadOpen, setUploadOpen,
+    selectEngine, selectVoice, previewVoice, stopPreview,
+    uploadVoice, deleteVoice,
+  };
+}
+```
+
+---
+
+**`frontend/src/services/tts.js` 확장 (기존 클래스 유지, 아래 함수 추가)**
+
+```javascript
+// 기존 TTSService 클래스 아래에 추가 (export 함수들)
+
+export async function fetchTTSEngines() {
+  return readJson(await fetch(buildApiUrl("/voice/tts/engines")), "엔진 목록 로드 실패");
+}
+
+export async function fetchTTSVoices(engineId) {
+  const q = engineId ? `?engine_id=${engineId}` : "";
+  return readJson(await fetch(buildApiUrl(`/voice/tts/voices${q}`)), "목소리 목록 로드 실패");
+}
+
+export async function selectTTSEngine(engineId, voiceId) {
+  return readJson(
+    await fetch(buildApiUrl("/voice/tts/engines/select"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ engine_id: engineId, ...(voiceId && { voice_id: voiceId }) }),
+    }),
+    "엔진 변경 실패"
+  );
+}
+
+export async function selectTTSVoice(voiceId) {
+  return selectTTSEngine(undefined, voiceId);
+}
+
+export async function previewTTSVoice(voiceId, engineId) {
+  const resp = await fetch(buildApiUrl("/voice/tts/preview"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ voice_id: voiceId, engine_id: engineId,
+                           text: "안녕! 나 하나야. 잘 지냈어?" }),
+  });
+  if (!resp.ok) throw new Error("미리듣기 실패");
+  return resp.blob();
+}
+
+export async function uploadTTSVoice(formData) {
+  const resp = await fetch(buildApiUrl("/voice/tts/voices/upload"), {
+    method: "POST", body: formData,
+  });
+  if (!resp.ok) throw new Error("업로드 실패");
+  return resp.json();
+}
+
+export async function deleteTTSVoice(voiceId) {
+  const resp = await fetch(buildApiUrl(`/voice/tts/voices/${encodeURIComponent(voiceId)}`), {
+    method: "DELETE",
+  });
+  if (!resp.ok) throw new Error("삭제 실패");
+  return resp.json();
+}
+```
+
+`readJson` helper를 `tts.js`에서도 재사용하려면 `settings.js`의 `readJson`을 `api.js`로 이동하거나 인라인 정의.
+
+---
+
+#### API 계약 추가 (API_CONTRACT.md)
+
+```
+GET /voice/tts/engines — TTS 엔진 목록 조회
+
+응답:
+{
+  "engines": [
+    {
+      "engine_id": "edge_tts",
+      "name": "Edge TTS (Microsoft)",
+      "description": "Microsoft 신경망 TTS. 인터넷 연결 필요.",
+      "requires_internet": true,
+      "supports_custom_voice": false,
+      "available": true
+    },
+    {
+      "engine_id": "fish_speech",
+      "name": "Fish Speech (로컬)",
+      "description": "로컬 AI TTS. 커스텀 목소리 지원. 별도 서버 실행 필요.",
+      "requires_internet": false,
+      "supports_custom_voice": true,
+      "available": false
+    }
+  ],
+  "current_engine_id": "edge_tts",
+  "current_voice_id": "ko-KR-SunHiNeural"
+}
+
+POST /voice/tts/engines/select — 엔진/목소리 변경
+요청: {"engine_id": "fish_speech", "voice_id": "hana-v1"}  (voice_id 생략 가능)
+응답: {"success": true, "current_engine_id": "fish_speech", "current_voice_id": "hana-v1"}
+에러:
+  {"error": true, "code": "ENGINE_NOT_FOUND",      "message": "알 수 없는 엔진이야."}
+  {"error": true, "code": "ENGINE_NOT_AVAILABLE",  "message": "Fish Speech 서버가 실행 중이지 않아."}
+  {"error": true, "code": "VOICE_NOT_FOUND",       "message": "해당 목소리가 없어."}
+
+GET /voice/tts/voices — 목소리 목록 조회
+쿼리: ?engine_id=edge_tts (생략 시 현재 엔진)
+응답:
+{
+  "engine_id": "edge_tts",
+  "voices": [
+    {"voice_id": "ko-KR-SunHiNeural", "name": "선희 (여성)", "gender": "female", "is_custom": false},
+    {"voice_id": "ko-KR-InJoonNeural","name": "인준 (남성)", "gender": "male",   "is_custom": false}
+  ]
+}
+
+POST /voice/tts/preview — 목소리 미리듣기
+요청: {"text": "안녕! 나 하나야.", "voice_id": "ko-KR-SunHiNeural", "engine_id": "edge_tts"}
+응답: audio/mpeg
+에러: {"error": true, "code": "ENGINE_NOT_AVAILABLE", "message": "..."}
+
+POST /voice/tts/voices/upload — 커스텀 목소리 추가 (Fish Speech)
+요청: multipart/form-data { audio: <wav/mp3>, name: "하나 v1", engine_id: "fish_speech" }
+응답: {"success": true, "voice": {VoiceInfo}}
+에러:
+  {"error": true, "code": "CUSTOM_VOICE_NOT_SUPPORTED", "message": "이 엔진은 커스텀 목소리를 지원하지 않아."}
+  {"error": true, "code": "AUDIO_TOO_LARGE",            "message": "파일이 너무 커. 10MB 이하로 올려줘."}
+  {"error": true, "code": "VOICE_ALREADY_EXISTS",       "message": "같은 이름의 목소리가 이미 있어."}
+
+DELETE /voice/tts/voices/{voice_id} — 커스텀 목소리 삭제
+응답: {"success": true}
+에러:
+  {"error": true, "code": "NOT_CUSTOM_VOICE", "message": "기본 제공 목소리는 삭제할 수 없어."}
+  {"error": true, "code": "VOICE_NOT_FOUND",  "message": "목소리를 찾을 수 없어."}
+```
+
+---
+
+#### 파일 소유권 (신규 파일 목록)
+
+**백엔드 신규:**
+```
+backend/services/tts_protocols.py
+backend/services/tts_engines/__init__.py
+backend/services/tts_engines/edge_tts_engine.py
+backend/services/tts_engines/fish_speech_engine.py
+backend/services/tts_router.py
+backend/tests/test_tts_engines.py
+```
+
+**백엔드 수정:**
+```
+backend/services/voice_output.py       ← tts_router 위임으로 교체
+backend/routers/voice.py               ← 엔드포인트 6개 추가
+backend/services/settings_service.py  ← tts_settings get/set 추가
+backend/main.py                        ← lifespan에서 TTSRouter 초기화
+```
+
+**프론트엔드 신규:**
+```
+frontend/src/hooks/useVoice.js
+frontend/src/styles/voice-panel.css    ← 엔진 카드, 목소리 행 스타일
+```
+
+**프론트엔드 수정:**
+```
+frontend/src/services/tts.js                           ← API 함수 6개 추가
+frontend/src/components/settings/panels/VoicePanel.jsx ← 전면 재작성
+```
+
+---
+
+#### 구현 순서
+
+1. `tts_protocols.py` — Protocol + dataclasses 정의
+2. `tts_engines/__init__.py`, `edge_tts_engine.py` — EdgeTTS 구현체 (기존 voice_output.py 로직 이동)
+3. `tts_engines/fish_speech_engine.py` — FishSpeech 구현체 (list_voices 디렉토리 스캔 포함)
+4. `tts_router.py` — TTSRouter 싱글턴 + lifespan 초기화
+5. `settings_service.py` — tts_settings get/set
+6. `voice_output.py` — tts_router.synthesize() 한 줄로 교체
+7. `routers/voice.py` — 6개 엔드포인트 추가
+8. `main.py` — TTSRouter 초기화 lifespan 등록
+9. `backend/tests/test_tts_engines.py` — 단위/통합 테스트
+10. `API_CONTRACT.md` — 6개 엔드포인트 추가
+11. `frontend/src/services/tts.js` — API 함수 6개 추가
+12. `frontend/src/hooks/useVoice.js` — 신규 훅
+13. `frontend/src/styles/voice-panel.css` — 엔진 카드 + 목소리 행 스타일
+14. `frontend/src/components/settings/panels/VoicePanel.jsx` — 전면 재작성
+
+#### 완료 기준
+- `GET /voice/tts/engines` → 엔진 목록 + available 상태 반환
+- Edge TTS 엔진 선택 → 선희/인준 목소리 목록 표시
+- 미리듣기 버튼 → 즉시 재생 (재생 중 ■ 정지 표시)
+- Fish Speech 선택 시 "서버 미실행" 상태 표시 + WAV 업로드 UI 활성화
+- WAV 업로드 → 목소리 목록 자동 갱신 (페이지 새로고침 없이)
+- 선택한 엔진/목소리 → settings.json 저장 → 서버 재시작 후 복원
+- `voice_output.py`의 `synthesize()` → tts_router 통해 실제 합성 동작
+- 기존 `/voice/tts` 엔드포인트 동작 변화 없음 (하위 호환)
+
+---
+
 ## 🔵 Claude Code 상태 (백엔드 + 프론트엔드 전담)
 > 이 섹션은 Claude Code만 수정합니다.
 
