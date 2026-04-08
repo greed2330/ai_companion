@@ -109,7 +109,7 @@ async def text_to_speech(req: TTSRequest) -> Response:
 
     try:
         wav_bytes = await synthesize(req.text, speed=speed, pitch=pitch, energy=energy)
-        return Response(content=wav_bytes, media_type="audio/wav")
+        return Response(content=wav_bytes, media_type="audio/mpeg")
     except Exception as e:
         logger.error("TTS error: %s", e)
         raise HTTPException(status_code=500, detail={

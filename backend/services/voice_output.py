@@ -1,79 +1,81 @@
 """
 음성 출력 서비스 (TTS).
-Kokoro TTS로 텍스트 → WAV 바이트 변환.
-실제 kokoro 없을 때는 ImportError를 그대로 올려서 라우터에서 503으로 처리.
+edge-tts로 텍스트 → MP3 바이트 변환.
+
+동작 방식:
+  텍스트 + prosody(감정) → Microsoft Edge TTS WebSocket → MP3 스트리밍 수신
+
+필요 패키지: pip install edge-tts
+인터넷 연결 필요. API 키/과금 없음.
+
+감정별 억양: tts_emotion.py의 speed/pitch 값을 edge-tts rate/pitch에 직접 매핑.
+  speed 1.1  → rate="+10%"
+  pitch 1.05 → pitch="+5Hz"
 """
 
-import io
 import logging
 import os
 
 logger = logging.getLogger(__name__)
 
-# Kokoro 기본 목소리: 한국어 여성 목소리
-KOKORO_VOICE: str = os.getenv("KOKORO_VOICE", "kf_bella")  # 한국어 여성 목소리
+TTS_VOICE: str = os.getenv("TTS_VOICE", "ko-KR-SunHiNeural")
+
+
+def _speed_to_rate(speed: float) -> str:
+    """speed 배율 → edge-tts rate 문자열. 예: 1.1 → '+10%', 0.9 → '-10%'"""
+    pct = round((speed - 1.0) * 100)
+    return f"+{pct}%" if pct >= 0 else f"{pct}%"
+
+
+def _pitch_to_hz(pitch: float) -> str:
+    """pitch 배율 → edge-tts pitch 문자열 (Hz). 예: 1.05 → '+5Hz', 0.95 → '-5Hz'"""
+    hz = round((pitch - 1.0) * 100)
+    return f"+{hz}Hz" if hz >= 0 else f"{hz}Hz"
 
 
 async def synthesize(
     text: str,
     speed: float = 1.0,
-    pitch: float = 0.0,
-    energy: float = 1.0,
+    pitch: float = 1.0,
+    energy: float = 1.0,  # 현재 미사용 (향후 volume 매핑 가능)
 ) -> bytes:
     """
-    텍스트를 WAV 바이트로 변환한다.
+    텍스트를 MP3 바이트로 변환한다.
 
     Parameters
     ----------
     text   : 합성할 텍스트
-    speed  : 재생 속도 배율 (1.0 = 기본)
-    pitch  : 피치 오프셋 (0.0 = 기본, 현재 Kokoro에서 무시)
-    energy : 에너지/볼륨 배율 (1.0 = 기본, 현재 Kokoro에서 무시)
+    speed  : 재생 속도 배율 (1.0 = 기본). tts_emotion.get_tts_params()["speed"] 값.
+    pitch  : 피치 배율 (1.0 = 기본). tts_emotion.get_tts_params()["pitch"] 값.
+    energy : 현재 미사용.
 
     Returns
     -------
-    WAV 바이너리 bytes
+    MP3 바이너리 bytes
     """
     try:
-        from kokoro import KPipeline  # pip install kokoro
+        import edge_tts
     except ImportError:
-        raise ImportError("kokoro not installed. pip install kokoro")
+        raise ImportError("edge-tts not installed. pip install edge-tts")
 
-    logger.info("TTS synthesize start: len=%d speed=%.2f", len(text), speed)
+    rate = _speed_to_rate(speed)
+    pitch_str = _pitch_to_hz(pitch)
 
-    # KPipeline: lang_code='a' (영어/범용), 'j' (일본어), 'z' (중국어)
-    # 한국어 전용 모델이 없으면 'a' 사용. 추후 한국어 모델 지원 시 lang_code 변경.
-    pipeline = KPipeline(lang_code="k")
+    logger.info(
+        "TTS synthesize start: voice=%s len=%d rate=%s pitch=%s",
+        TTS_VOICE, len(text), rate, pitch_str,
+    )
 
-    # speed는 KPipeline의 speed 파라미터로 전달
-    wav_chunks = []
-    generator = pipeline(text, voice=KOKORO_VOICE, speed=speed, split_pattern=r"\n+")
-    for _gs, _ps, audio in generator:
-        wav_chunks.append(audio)
+    communicate = edge_tts.Communicate(text, TTS_VOICE, rate=rate, pitch=pitch_str)
+    mp3_chunks: list[bytes] = []
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            mp3_chunks.append(chunk["data"])
 
-    if not wav_chunks:
-        logger.warning("TTS produced no audio chunks for text=%r", text[:30])
-        return _empty_wav()
+    if not mp3_chunks:
+        logger.warning("TTS produced no audio for text=%r", text[:30])
+        return b""
 
-    # numpy 배열 → WAV bytes
-    import numpy as np
-    import soundfile as sf  # pip install soundfile
-
-    combined = np.concatenate(wav_chunks) if len(wav_chunks) > 1 else wav_chunks[0]
-
-    buf = io.BytesIO()
-    sf.write(buf, combined, samplerate=24000, format="WAV")
-    wav_bytes = buf.getvalue()
-
-    logger.info("TTS synthesize done: wav_size=%d bytes", len(wav_bytes))
-    return wav_bytes
-
-
-def _empty_wav() -> bytes:
-    """샘플이 없을 때 반환할 최소 빈 WAV 파일."""
-    import numpy as np
-    import soundfile as sf
-
-    buf = io.BytesIO()
-    sf.write(buf, np.zeros(1, dtype=np.float32), samplerate=24000, format="WAV")
-    return buf.getvalue()
+    mp3_bytes = b"".join(mp3_chunks)
+    logger.info("TTS synthesize done: mp3_size=%d bytes", len(mp3_bytes))
+    return mp3_bytes
