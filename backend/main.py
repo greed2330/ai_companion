@@ -44,6 +44,15 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("DB initialized")
     load_cached_context()
+    # TTS 엔진 등록 및 설정 복원
+    try:
+        from backend.services.tts_edge import EdgeTTSEngine
+        from backend.services.tts_router import tts_router
+        tts_router.register(EdgeTTSEngine())
+        tts_router.load_from_settings()
+        logger.info("TTS router initialized")
+    except Exception as e:
+        logger.warning("TTS router init failed: %s", e)
     # ChromaDB 레거시 컬렉션 마이그레이션 (기존 hana_memory → hana_memory_longterm)
     try:
         from backend.services.memory_service import migrate_legacy_collection
