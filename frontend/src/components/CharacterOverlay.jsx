@@ -11,7 +11,6 @@ import {
   createPettingTracker,
   getClickZone,
   getGazeOffset,
-  ZONE_REACTIONS,
 } from "./character/interactionUtils";
 // import { requestReactionBubble } from "../services/reactions";
 import { characterController } from "../services/characterController";
