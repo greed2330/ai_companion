@@ -203,8 +203,8 @@ def test_system_prompt_clean():
     """
     from backend.services.llm import build_system_prompt
     prompt = build_system_prompt()
-    # 자연어 말투 지시가 있어야 함
-    assert "말투 규칙" in prompt
+    # 말투 지시가 있어야 함 (기본 말투 섹션)
+    assert "기본 말투" in prompt
     # 금지 목록이 명시되어 있어야 함
     assert "절대 금지" in prompt
     # Good/Bad 예시가 있어야 함

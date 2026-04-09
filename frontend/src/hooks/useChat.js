@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { buildApiUrl } from "../services/api";
 import { submitFeedback as postFeedback } from "../services/feedback";
+import { OUTPUT_MODES } from "../constants/outputModes";
+import { ttsService } from "../services/tts";
 
 export default function useChat(
   conversationId,
@@ -34,6 +36,11 @@ export default function useChat(
       return;
     }
 
+    // Read outputMode from Electron store at send time so it reflects the latest saved setting.
+    const appSettings = await window.hanaDesktop?.getAppSettings?.() || {};
+    const outputMode = appSettings?.voice?.outputMode || OUTPUT_MODES.CHAT;
+    const isVoiceMode = outputMode === OUTPUT_MODES.VOICE || outputMode === OUTPUT_MODES.BUBBLE_VOICE;
+
     const userMessage = {
       role: "user",
       content: text,
@@ -49,6 +56,8 @@ export default function useChat(
     }]);
     setIsStreaming(true);
 
+    let accumulatedContent = "";
+
     try {
       const response = await fetch(buildApiUrl("/chat"), {
         method: "POST",
@@ -57,7 +66,7 @@ export default function useChat(
           message: text,
           conversation_id: conversationId ?? null,
           interaction_type: null,
-          voice_mode: false,
+          voice_mode: isVoiceMode,
         }),
       });
 
@@ -92,6 +101,7 @@ export default function useChat(
           try {
             const event = JSON.parse(raw);
             if (event.type === "token") {
+              accumulatedContent += event.content || "";
               setMessages((prev) =>
                 prev.map((message) =>
                   message.id === tempId
@@ -117,6 +127,9 @@ export default function useChat(
               }
               onMessagePersisted?.();
               setIsStreaming(false);
+              if (isVoiceMode && accumulatedContent) {
+                ttsService.speak(accumulatedContent).catch(() => {});
+              }
             } else if (event.type === "room_change") {
               onRoomChange?.(event.room_type || "일반");
             } else if (event.type === "error") {
