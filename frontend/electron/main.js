@@ -504,14 +504,10 @@ function registerIpcHandlers() {
     const saved = saveStoredAppSettings(payload);
 
     registerShortcuts();
-    if (typeof app.setLoginItemSettings === "function") {
-      try {
-        app.setLoginItemSettings({
-          openAtLogin: Boolean(saved.app?.autoLaunch)
-        });
-      } catch (_) {
-        // macOS 개발 모드에서 앱 서명 없이 setLoginItemSettings 호출 시 실패 — 무시
-      }
+    if (app.isPackaged && typeof app.setLoginItemSettings === "function") {
+      app.setLoginItemSettings({
+        openAtLogin: Boolean(saved.app?.autoLaunch)
+      });
     }
 
     return saved;
@@ -534,12 +530,8 @@ function registerIpcHandlers() {
     });
   });
   ipcMain.on("set-auto-launch", (_event, value) => {
-    if (typeof app.setLoginItemSettings === "function") {
-      try {
-        app.setLoginItemSettings({ openAtLogin: Boolean(value) });
-      } catch (_) {
-        // macOS 개발 모드에서 앱 서명 없이 호출 시 실패 — 무시
-      }
+    if (app.isPackaged && typeof app.setLoginItemSettings === "function") {
+      app.setLoginItemSettings({ openAtLogin: Boolean(value) });
     }
   });
   ipcMain.on("char-viewport-size", (_event, value) => {
