@@ -30,7 +30,7 @@ from backend.services.llm import postprocess_for_voice
 from backend.services.motion_lookup import get_motion_data
 from backend.services.llm_router import llm_router
 from backend.services.memory import search_memory, update_confidence
-from backend.services.mood import detect_mood_from_text, get_mood, push_event, set_mood
+from backend.services.mood import get_mood, push_event, set_mood
 from backend.services.response_parser import parse_response
 from backend.services.room_service import ROOM_MESSAGES, detect_room_type
 from backend.services.safety_filter import get_block_response, should_block
@@ -120,6 +120,16 @@ async def _load_recent_messages(
     return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
 
 
+async def _update_message_mood(message_id: str, mood: str) -> None:
+    """백그라운드 감정 파싱 완료 후 messages.mood_at_response를 업데이트한다."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE messages SET mood_at_response = ? WHERE id = ?",
+            (mood, message_id),
+        )
+        await db.commit()
+
+
 async def _save_message(
     db: aiosqlite.Connection,
     message_id: str,
@@ -188,10 +198,11 @@ async def _background_process(
         # TTS 파라미터
         tts = get_tts_params(parsed.emotion, parsed.intensity)
 
-        # 무드 업데이트
+        # 무드 업데이트 (백그라운드 단일 경로)
         from backend.models.emotion import EMOTION_TO_MOOD
         new_mood = EMOTION_TO_MOOD.get(parsed.emotion, "IDLE")
         set_mood(new_mood)
+        await _update_message_mood(assistant_msg_id, new_mood)
 
         # 모션/텐션 — 룩업 테이블 (2nd LLM call 대체)
         motion_data = get_motion_data(parsed.emotion, parsed.intensity)
@@ -400,27 +411,24 @@ async def run_chat_pipeline(
                 full_text = postprocess_for_voice(full_text)
                 yield f"data: {json.dumps({'type': 'token', 'content': full_text}, ensure_ascii=False)}\n\n"
 
-            # 무드 감지 및 업데이트
-            detected_mood = detect_mood_from_text(full_text)
-            set_mood(detected_mood)
-
-            # 어시스턴트 메시지 저장
+            # 어시스턴트 메시지 저장 (mood는 백그라운드에서 확정 후 UPDATE)
             await _save_message(
                 db,
                 assistant_msg_id,
                 cid,
                 "assistant",
                 full_text,
-                mood=detected_mood,
+                mood=None,
                 response_time_ms=elapsed_ms,
                 interaction_type=interaction_type,
             )
 
+            # "PENDING": 백그라운드가 emotion_update SSE로 최종 무드 전달
             done_event = {
                 "type":            "done",
                 "message_id":      assistant_msg_id,
                 "conversation_id": cid,
-                "mood":            detected_mood,
+                "mood":            "PENDING",
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"

@@ -38,7 +38,7 @@
 }
 ```
 
-`interaction_type` 값: `"coding"` | `"chat"` | `"game"` | null (auto-detect)
+`interaction_type` 값: `"chat"` | `"game"` | null (auto-detect)
 `voice_mode`: true이면 응답 후처리(이모지 제거, 50자 이내 단문화) + think 강제 비활성화
 
 응답 (Server-Sent Events):
@@ -46,9 +46,13 @@
 data: {"type": "token", "content": "안"}
 data: {"type": "token", "content": "녕"}
 data: {"type": "token", "content": "!"}
-data: {"type": "done", "message_id": "uuid", "conversation_id": "uuid", "mood": "HAPPY"}
+data: {"type": "done", "message_id": "uuid", "conversation_id": "uuid", "mood": "PENDING"}
 data: [DONE]
 ```
+
+`done` 이벤트의 `"mood": "PENDING"` — 프론트는 이 값을 받으면 캐릭터 무드를 변경하지 않고
+이후 `emotion_update` SSE 이벤트를 기다린다. 백그라운드 처리가 완료되면 emotion_update로
+최종 무드가 전달된다.
 
 룸 변경 이벤트 (대화 내 룸 타입 전환 시):
 ```
