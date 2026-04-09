@@ -56,6 +56,13 @@ class EdgeTTSEngine:
     def engine_info(self) -> EngineInfo:
         return _ENGINE_INFO
 
+    async def is_available(self) -> bool:
+        try:
+            import edge_tts  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
     async def list_voices(self) -> list[VoiceInfo]:
         return list(_KO_VOICES)
 
