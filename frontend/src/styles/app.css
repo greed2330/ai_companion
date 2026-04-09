@@ -251,6 +251,71 @@ button, input, select { font: inherit; }
 @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(1); } 50% { opacity: 1; transform: translateY(-20px) scale(1.2); } 100% { opacity: 0; transform: translateY(-40px) scale(.8); } }
 .character-overlay-effect { position: fixed; z-index: 9999; pointer-events: none; font-size: 2rem; animation: floatUp 1500ms ease-out forwards; }
 
+/* ── TTS 엔진 카드 ─────────────────────────────────────────── */
+.engine-cards { display: flex; gap: 8px; }
+.engine-card {
+  flex: 1; padding: 12px 14px; border: 1px solid var(--hana-border);
+  border-radius: 10px; cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+  transition: border-color .15s, background .15s;
+}
+.engine-card:hover { background: var(--hana-surface-2); border-color: var(--hana-border-2); }
+.engine-card--active { border-color: var(--hana-accent); background: rgba(124,106,247,.08); }
+.engine-card--unavailable { opacity: .55; cursor: not-allowed; }
+.engine-card--unavailable:hover { background: transparent; border-color: var(--hana-border); }
+.engine-card__name { font-size: 13px; font-weight: 500; }
+.engine-card__desc { font-size: 11px; color: var(--hana-muted); line-height: 1.4; }
+.engine-card__status { font-size: 11px; margin-top: 4px; }
+.engine-card__status--ok { color: var(--hana-success); }
+.engine-card__status--fail { color: var(--hana-dim); }
+
+/* ── 목소리 목록 ───────────────────────────────────────────── */
+.voice-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.voice-row {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  border-radius: 8px; cursor: pointer; transition: background .1s;
+  border: 1px solid transparent;
+}
+.voice-row:hover { background: var(--hana-surface-2); }
+.voice-row--active { background: rgba(124,106,247,.1); border-color: rgba(124,106,247,.25); }
+.voice-row__info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.voice-row__name { font-size: 13px; }
+.voice-row__id { font-size: 11px; color: var(--hana-dim); }
+.voice-preview-btn {
+  padding: 4px 10px; border-radius: 6px; border: 1px solid var(--hana-border-2);
+  background: var(--hana-surface-2); color: var(--hana-muted); font-size: 11px; cursor: pointer;
+  white-space: nowrap; transition: background .1s, color .1s;
+}
+.voice-preview-btn:hover { background: var(--hana-surface-3); color: var(--hana-text); }
+.voice-preview-btn--playing { border-color: var(--hana-accent); color: var(--hana-accent-2); }
+.voice-preview-btn--error { border-color: var(--hana-danger); color: var(--hana-danger); }
+.voice-row__delete {
+  opacity: 0; background: none; border: none; cursor: pointer;
+  color: var(--hana-danger); font-size: 14px; padding: 4px;
+  transition: opacity .1s;
+}
+.voice-row:hover .voice-row__delete { opacity: 1; }
+
+/* ── 커스텀 목소리 업로드 ──────────────────────────────────── */
+.voice-upload { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--hana-border); border-radius: 10px; background: var(--hana-surface-2); margin-top: 8px; }
+.voice-upload__trigger { align-self: flex-start; margin-top: 4px; }
+.voice-upload__dropzone {
+  padding: 20px; border: 1.5px dashed var(--hana-border-2); border-radius: 8px;
+  text-align: center; cursor: pointer; color: var(--hana-muted); font-size: 12px;
+  line-height: 1.6; transition: border-color .15s, background .15s;
+}
+.voice-upload__dropzone:hover, .voice-upload__dropzone--over { border-color: var(--hana-accent); background: rgba(124,106,247,.06); }
+.voice-upload__dropzone--has-file { border-style: solid; color: var(--hana-text); }
+.voice-upload__error { font-size: 11px; color: var(--hana-danger); }
+.voice-upload__actions { display: flex; gap: 8px; justify-content: flex-end; }
+.hana-input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--hana-border-2);
+  border-radius: 8px; background: var(--hana-surface-3); color: var(--hana-text);
+  font-size: 13px; outline: none;
+}
+.hana-input:focus { border-color: var(--hana-accent); }
+.button--accent { background: var(--hana-accent); border-color: var(--hana-accent); color: #fff; }
+.button--accent:hover { background: var(--hana-accent-2); border-color: var(--hana-accent-2); }
+
 @media (max-width: 560px) {
   .chat-layout, .settings-shell__layout, .settings-form-grid, .starter-grid, .settings-card__split, .choice-grid { grid-template-columns: 1fr; }
   .chat-rail, .settings-sidebar { display: none; }

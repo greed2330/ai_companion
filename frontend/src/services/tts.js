@@ -97,3 +97,64 @@ export class TTSService {
 }
 
 export const ttsService = new TTSService();
+
+// ---------------------------------------------------------------------------
+// TTS 엔진/목소리 관리 API
+// ---------------------------------------------------------------------------
+
+async function _readJson(resp, errMsg) {
+  if (!resp.ok) throw new Error(errMsg);
+  return resp.json();
+}
+
+export async function fetchTTSEngines() {
+  return _readJson(await fetch(buildApiUrl("/voice/tts/engines")), "엔진 목록 로드 실패");
+}
+
+export async function fetchTTSVoices(engineId) {
+  const q = engineId ? `?engine_id=${encodeURIComponent(engineId)}` : "";
+  return _readJson(await fetch(buildApiUrl(`/voice/tts/voices${q}`)), "목소리 목록 로드 실패");
+}
+
+export async function selectTTSEngine(engineId, voiceId) {
+  return _readJson(
+    await fetch(buildApiUrl("/voice/tts/engines/select"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ engine_id: engineId, ...(voiceId ? { voice_id: voiceId } : {}) }),
+    }),
+    "엔진 변경 실패"
+  );
+}
+
+export async function previewTTSVoice(voiceId, engineId) {
+  const resp = await fetch(buildApiUrl("/voice/tts/preview"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      voice_id: voiceId,
+      engine_id: engineId,
+      text: "안녕! 나 하나야. 잘 지냈어?",
+    }),
+  });
+  if (!resp.ok) throw new Error("미리듣기 실패");
+  return resp.blob();
+}
+
+export async function uploadTTSVoice(formData) {
+  const resp = await fetch(buildApiUrl("/voice/tts/voices/upload"), {
+    method: "POST",
+    body: formData,
+  });
+  if (!resp.ok) throw new Error("업로드 실패");
+  return resp.json();
+}
+
+export async function deleteTTSVoice(voiceId) {
+  const resp = await fetch(
+    buildApiUrl(`/voice/tts/voices/${encodeURIComponent(voiceId)}`),
+    { method: "DELETE" }
+  );
+  if (!resp.ok) throw new Error("삭제 실패");
+  return resp.json();
+}
