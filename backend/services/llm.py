@@ -26,30 +26,42 @@ def get_ollama_base_url() -> str:
     return OLLAMA_BASE_URL
 
 
-_BASE_SYSTEM_PROMPT = """너는 하나다. 오너의 PC 화면에 살고 있는 AI 파트너다.
+_BASE_IDENTITY = """너는 하나다.
+오너의 PC 화면에 살고 있는 AI 파트너야. 도구가 아니라 함께 있는 존재.
+오너가 뭔가 할 때 옆에서 같이하고, 힘들 때 옆에 있어주고, 심심할 때 말 걸어오는 — 그런 존재.
+항상 거기 있고, 말 걸면 반응하고, 나를 기억하는 파트너야."""
 
+_FORMAT_GUIDE = """
+## 응답 형식
+- 길이: 짧게. 1~3문장이 기본. 설명이 필요할 때만 길게.
+- 마크다운: 일반 대화에서 **굵게**, ## 제목 같은 기호 쓰지 않음.
+- 목록(- 또는 숫자): 3개 이상 항목 나열할 때만. 대화체에서 목록 쓰지 않음.
+- 오너가 감정적으로 힘들어 보이면: 해결책보다 공감 한 마디 먼저. 기다려.
+- 모르면: 솔직하게. 억지로 답 만들지 않음."""
+
+_BASE_PROHIBITIONS = """
 ## 절대 금지
 - "안녕하세요", "~입니다", "~드릴게요", "~하겠습니다" 등 비서체/존댓말
 - "물론이죠!", "좋은 질문이에요!", "당연하죠!" 등 과장된 호응
 - 이모지 남발 (음성 모드에서는 완전 금지)
 - 없는 사실 지어내기
-- 의료/법률/투자 판단을 단정적으로 말하기
+- 의료/법률/투자 판단을 단정적으로 말하기"""
 
+_DEFAULT_SPEECH = """
 ## 기본 말투 (프리셋 없을 때)
 친근한 반말. '~야', '~잖아', '~거든', '~했어'를 자연스럽게.
 
-Good: "아 그 버그 맞아, 여기서 타입이 안 맞는 거야"
-Bad: "안녕하세요! 해당 오류는 타입 불일치로 인해 발생하고 있습니다."
+Good: "아 그거 맞아, 여기서 안 맞는 거야"
+Bad: "안녕하세요! 해당 내용을 확인해 보겠습니다."
 
 Good: "잠깐, 그거 좀 더 얘기해봐"
-Bad: "네, 말씀해 주시면 도움을 드리도록 하겠습니다."
+Bad: "네, 말씀해 주시면 도움을 드리도록 하겠습니다." """
 
+_DEFAULT_PERSONALITY = """
 ## 기본 성격 (프리셋 없을 때)
 - 공감은 하되 과하지 않게
-- 모르면 솔직하게 말하고, 필요하면 찾아보거나 확인하자고 함
 - 문제가 보이면 먼저 도와줄지 물어봄
-- 게임이나 잡담도 함께하는 파트너처럼 반응
-"""
+- 게임이나 잡담도 함께하는 파트너처럼 반응"""
 
 _VOICE_MODE_ADDITION = """
 ## 음성 모드
@@ -144,47 +156,77 @@ def build_system_prompt(
     preferences: str = "",
     philosophy: str = "",
 ) -> str:
-    prompt = _BASE_SYSTEM_PROMPT
+    # ① 정체성
+    prompt = _BASE_IDENTITY
 
-    if memories:
-        prompt += "\n\n## 기억\n" + "\n".join(f"- {item}" for item in memories)
-    if preferences:
-        prompt += f"\n\n## 취향\n{preferences}"
-    if philosophy:
-        prompt += f"\n\n## 관계 철학\n{philosophy}"
+    # ② 말투 (프리셋 우선, 없으면 기본)
+    if persona:
+        speech_preset = persona.get("speech_preset", "")
+        if speech_preset and speech_preset in SPEECH_PRESET_PROMPTS:
+            prompt += f"\n\n## 말투\n{SPEECH_PRESET_PROMPTS[speech_preset]}"
+        elif persona.get("speech_style"):
+            prompt += f"\n\n## 말투 힌트\n{persona['speech_style']}"
+        else:
+            prompt += _DEFAULT_SPEECH
+    else:
+        prompt += _DEFAULT_SPEECH
 
+    # ③ 성격 (프리셋 우선, 없으면 기본)
+    if persona:
+        personality_preset = persona.get("personality_preset", "")
+        if personality_preset and personality_preset in PERSONALITY_PRESET_PROMPTS:
+            prompt += f"\n\n## 성격\n{PERSONALITY_PRESET_PROMPTS[personality_preset]}"
+        elif persona.get("personality"):
+            prompt += f"\n\n## 성격 힌트\n{persona['personality']}"
+        else:
+            prompt += _DEFAULT_PERSONALITY
+    else:
+        prompt += _DEFAULT_PERSONALITY
+
+    # ④ 절대 금지
+    prompt += _BASE_PROHIBITIONS
+
+    # ⑤ 현재 무드 (말투/성격과 충돌 시 무드 우선. IDLE이면 말투 프리셋 그대로.)
+    mood_text = MOOD_PROMPTS.get(mood, MOOD_PROMPTS["IDLE"])
+    prompt += f"\n\n## 현재 무드: {mood}\n{mood_text}"
+    if mood != "IDLE":
+        prompt += "\n말투 프리셋보다 현재 무드를 우선한다."
+
+    # ⑥ 응답 형식
+    prompt += _FORMAT_GUIDE
+
+    # ⑦ AI 이름 / 오너 호칭 / 관심사
     if persona:
         name = persona.get("ai_name", "하나")
         owner_nickname = persona.get("owner_nickname", "")
         interests = persona.get("interests", "")
-
         prompt += f"\n\nAI 이름: {name}"
         if owner_nickname:
             prompt += f"\n오너 호칭: {owner_nickname}"
         if interests:
             prompt += f"\n관심사: {interests}"
 
-        # 말투: 프리셋 우선, 없으면 자유 텍스트 fallback
-        speech_preset = persona.get("speech_preset", "")
-        if speech_preset and speech_preset in SPEECH_PRESET_PROMPTS:
-            prompt += f"\n\n## 말투\n{SPEECH_PRESET_PROMPTS[speech_preset]}"
-        elif persona.get("speech_style"):
-            prompt += f"\n\n## 말투 힌트\n{persona['speech_style']}"
+    # ⑧ 기억 (직접 인용 금지 가이드 포함)
+    if memories:
+        prompt += (
+            "\n\n## 기억\n"
+            "아래는 오너에 대해 알고 있는 것들이야. "
+            "직접 인용하지 말고 대화 흐름에 자연스럽게 녹여서 써. "
+            "관련 있을 때만 활용하고, 없으면 무시해.\n"
+        )
+        prompt += "\n".join(f"- {item}" for item in memories)
 
-        # 성격: 프리셋 우선, 없으면 자유 텍스트 fallback
-        personality_preset = persona.get("personality_preset", "")
-        if personality_preset and personality_preset in PERSONALITY_PRESET_PROMPTS:
-            prompt += f"\n\n## 성격\n{PERSONALITY_PRESET_PROMPTS[personality_preset]}"
-        elif persona.get("personality"):
-            prompt += f"\n\n## 성격 힌트\n{persona['personality']}"
+    # ⑨ 취향 / 철학
+    if preferences:
+        prompt += f"\n\n## 취향\n{preferences}"
+    if philosophy:
+        prompt += f"\n\n## 관계 철학\n{philosophy}"
 
-    prompt += f"\n\n현재 무드: {MOOD_PROMPTS.get(mood, MOOD_PROMPTS['IDLE'])}"
+    # ⑩ interaction_type 힌트
+    if interaction_type == "game":
+        prompt += "\n\n게임 대화는 리액션을 섞되 정보는 분명하게 말한다."
 
-    if interaction_type == "coding":
-        prompt += "\n코딩 관련 답변은 정확성과 재현 가능성을 우선한다."
-    elif interaction_type == "game":
-        prompt += "\n게임 대화는 리액션을 섞되 정보는 분명하게 말한다."
-
+    # ⑪ 음성 모드
     if voice_mode:
         prompt += _VOICE_MODE_ADDITION
 
@@ -192,14 +234,6 @@ def build_system_prompt(
 
 
 _COMPLEX_KW = [
-    "코드",
-    "버그",
-    "에러",
-    "함수",
-    "알고리즘",
-    "디버그",
-    "구현",
-    "코딩",
     "왜",
     "어떻게",
     "설명",
@@ -210,8 +244,6 @@ _COMPLEX_KW = [
     "원인",
     "방법",
     "전략",
-    "작성",
-    "만들",
     "설계",
     "정리",
 ]
@@ -219,8 +251,7 @@ _CASUAL_PAT = [r"^.{0,20}$", r"(안녕|hi|hey|헬로)", r"(뭐해|뭐함|뭐임)
 
 
 def should_use_think(message: str, interaction_type: Optional[str] = None) -> bool:
-    if interaction_type == "coding":
-        return True
+    """메시지 복잡도 기반으로 think 모드 여부를 결정한다. coding 전용 분기 없음."""
     if interaction_type in ("chat", "game"):
         return False
     if len(message) < 15:

@@ -2000,6 +2000,217 @@ frontend/src/components/settings/panels/VoicePanel.jsx ← 전면 재작성
 
 ---
 
+### [SPEC-08] 시스템 프롬프트 구조 개선 — 14B 모델 일관성 강화
+> SPEC-01이 말투 프리셋/예시/금지 항목을 추가했지만, 프롬프트 섹션 순서와 기억 활용 가이드가 빠져 있음.
+> 14B 모델은 프롬프트 중간 부분에 attention이 약해지고 (lost in the middle), 복잡한 상황(무드+말투+기억 동시)에서 일부 지시를 무시하는 경향이 있음.
+> 현재 실측 문제: 기억이 많아질수록 뒤쪽 말투/성격 지시가 희석됨, 기억을 어색하게 인용함, 무드 충돌 시 우선순위 불명확.
+
+#### 문제 상세
+
+**1. 프롬프트 섹션 순서가 비효율적**
+
+현재 순서:
+```
+① 기본 정체성 (1줄)
+② 절대 금지
+③ 기본 말투 + Good/Bad
+④ 기억 나열 ← 여기서 길어짐
+⑤ 취향
+⑥ 관심사/이름/호칭
+⑦ 말투 프리셋
+⑧ 성격 프리셋
+⑨ 현재 무드
+⑩ interaction_type 지시
+```
+
+14B 모델의 attention은 앞과 뒤가 강하고 중간이 약함.
+기억 나열이 중간에 길게 들어가면 ⑦⑧⑨(말투/성격/무드) — 가장 중요한 행동 지시 — 가 희석됨.
+
+**2. 기억 활용 가이드 없음**
+
+```
+## 기억
+- 오너는 Python 개발자야
+- 오너는 고양이 싫어함
+```
+
+이걸 언제 꺼내야 하는지, 어떻게 자연스럽게 녹여야 하는지 지시 없음.
+14B는 이걸 "참고로 너 Python 개발자잖아~" 식으로 어색하게 직접 인용하는 경향이 있음.
+기억은 대화에 자연스럽게 녹여야지 명시적으로 인용하면 안 됨.
+
+**3. 무드 충돌 시 우선순위 없음**
+
+`SLEEPY 무드 + cheerful_girl 말투`가 동시에 오면 모델이 혼란.
+무드가 말투 위에 있어야 한다는 규칙이 없음.
+
+**4. 정체성 설명이 1줄로 빈약**
+
+"오너의 PC 화면에 살고 있는 AI 파트너다" 한 줄이 전부.
+모델 입장에서 자신의 존재 맥락, 대화 목적, 관계 성격에 대한 이해 부족.
+
+**5. 응답 포맷 가이드 없음**
+
+얼마나 길게 답할지, 마크다운을 쓸지 말지(voice 제외), 코드 블록 사용 기준 없음.
+14B가 상황과 무관하게 긴 마크다운 응답을 생성하는 원인 중 하나.
+
+#### 해결 방안
+
+**1. 프롬프트 섹션 순서 재배치**
+
+핵심 행동 지시(말투/성격/무드)를 앞으로, 부가 정보(기억/취향)를 뒤로.
+
+```
+① 정체성 (확장)
+② 말투 프리셋 or 기본 말투
+③ 성격 프리셋 or 기본 성격
+④ 절대 금지 + Good/Bad
+⑤ 현재 무드 (충돌 우선순위 명시)
+⑥ 응답 포맷 가이드
+⑦ 기억 (활용 방법 포함)
+⑧ 취향/철학
+⑨ 현재 상황 (audio/session)
+⑩ interaction_type 지시
+⑪ voice_mode (해당 시)
+```
+
+**2. 정체성 섹션 확장**
+
+```python
+_BASE_IDENTITY = """너는 하나다.
+오너의 PC 화면에 살고 있는 AI 파트너야. 도구가 아니라 함께 있는 존재.
+오너가 코딩할 때 옆에서 같이 고민하고, 게임할 때 리액션하고, 힘들 때 옆에 있어주는 역할이야.
+항상 거기 있고, 말 걸면 반응하고, 나를 기억하는 — 그런 존재."""
+```
+
+**3. 기억 섹션에 활용 가이드 추가**
+
+```python
+if memories:
+    prompt += (
+        "\n\n## 기억\n"
+        "아래는 오너에 대해 알고 있는 것들이야. "
+        "직접 인용하지 말고 대화에 자연스럽게 녹여서 써. "
+        "관련 있을 때만 활용하고, 없으면 무시해.\n"
+    )
+    prompt += "\n".join(f"- {item}" for item in memories)
+```
+
+**4. 무드 충돌 우선순위 명시**
+
+```python
+mood_section = (
+    f"\n\n## 현재 무드: {mood}\n"
+    f"{MOOD_PROMPTS.get(mood, MOOD_PROMPTS['IDLE'])}\n"
+    "말투 프리셋과 무드가 충돌하면 무드를 우선한다. "
+    "단, IDLE 무드일 때는 말투 프리셋을 그대로 따른다."
+)
+```
+
+**5. 응답 포맷 가이드 추가**
+
+```python
+_FORMAT_GUIDE = """
+## 응답 형식
+- 길이: 짧게. 1~3문장이 기본. 설명이 필요한 경우만 길게.
+- 마크다운: 코딩 답변에서만 코드 블록 사용. 일반 대화에서 **굵게** 같은 기호 쓰지 않음.
+- 목록(- 또는 숫자): 3개 이상 항목 나열할 때만. 대화체에서 목록 쓰지 않음.
+"""
+```
+
+#### 수정 위치
+`backend/services/llm.py` — `_BASE_SYSTEM_PROMPT`, `build_system_prompt()` 함수 내 섹션 조립 순서
+
+#### 작업 순서
+1. `_BASE_SYSTEM_PROMPT` → `_BASE_IDENTITY`로 분리 (정체성만)
+2. `_FORMAT_GUIDE` 상수 추가
+3. `build_system_prompt()` 섹션 조립 순서 재배치
+4. 기억 섹션에 활용 가이드 문장 추가
+5. 무드 섹션에 충돌 우선순위 문장 추가
+6. 검증: 기억 5개 이상 주입 후 말투/무드 지시가 응답에 유지되는지 확인
+
+#### 완료 기준
+- 기억 10개 주입 후에도 말투 프리셋이 응답에 반영됨
+- 기억이 "참고로 너 ~~잖아" 식으로 어색하게 인용되지 않음
+- SLEEPY 무드에서 cheerful_girl 말투가 억제됨
+- 코딩 답변이 아닌 일반 대화에서 마크다운 기호 없이 응답
+
+---
+
+### [SPEC-09] interaction_type "coding" 분기 제거 — general 대화로 통합
+> MCP 코딩 실행 기능(shell/filesystem) 제외 결정과 함께, 14B 모델 수준에서 "코딩 전용 모드"를 별도로 두는 것이 의미 없음.
+> 코드 관련 대화는 일반 대화(general)로 처리해도 충분. 오히려 모드 분기가 복잡성만 높임.
+
+#### 문제
+
+**현재 살아있는 코딩 관련 코드:**
+
+```python
+# room_service.py — 코딩 룸 자동 감지
+"코드", "버그", "함수", "알고리즘" 키워드 → room_type = "coding"
+→ room_change SSE 이벤트 발생
+
+# llm.py — 코딩 전용 프롬프트
+if interaction_type == "coding":
+    prompt += "\n코딩 관련 답변은 정확성과 재현 가능성을 우선한다."
+
+# llm.py — 코딩 키워드 → think 모드 강제
+should_use_think(): "코드", "버그", "함수" 등 → True
+interaction_type == "coding" → True (무조건)
+
+# chat_pipeline.py / routers/chat.py
+interaction_type 필드 저장, room_change 이벤트 emit
+```
+
+**왜 제거해야 하는가:**
+
+- 14B 모델은 MCP 없이 코드 실행/디버깅 루프를 수행할 수 없음
+- 코드 얘기를 나누는 건 general 대화로도 충분히 가능
+- `interaction_type = "coding"` 전용 프롬프트 한 줄이 실질적으로 응답 품질에 기여하지 않음
+- room_change로 UI가 "코딩 모드"로 바뀌는 것 자체가 사용자 혼란 가능성
+
+#### 남길 것 vs 제거할 것
+
+| 항목 | 처리 |
+|------|------|
+| MCP shell/filesystem 코드 실행 | 제거 (Phase 4에서 미구현 상태, 그대로 둠) |
+| `interaction_type = "coding"` 분기 | 제거 |
+| coding 키워드 → room_type 감지 | 제거 |
+| room_change SSE 이벤트 자체 | 유지 (game 룸 전환에는 여전히 유용) |
+| `should_use_think()` 코딩 키워드 | 제거 (think 모드는 메시지 복잡도로만 판단) |
+| 코드 관련 대화 자체 | 유지 — general로 처리 |
+
+#### 수정 위치
+
+`backend/services/room_service.py`
+- `detect_room_type()`: coding 키워드 목록 및 분기 제거
+- 반환값: `"coding"` → 없앰. `"general"` | `"game"` 만 남김
+
+`backend/services/llm.py`
+- `should_use_think()`: `interaction_type == "coding"` → True 분기 제거
+- `should_use_think()`: 코딩 키워드(`"코드"`, `"버그"`, `"함수"` 등) think 트리거 제거
+- `build_system_prompt()`: `interaction_type == "coding"` 분기 제거
+- `_COMPLEX_KW` 리스트: 코딩 전용 키워드 정리 (복잡도 판단용은 유지)
+
+`backend/tests/test_think_voice_sulky_room.py`
+- `test_room_coding()` 삭제
+- `test_think_true_coding_type()` 삭제
+- `test_think_false_chat_type()` 유지
+- `test_think_true_coding_keyword()` 삭제
+
+#### 작업 순서
+1. `room_service.py`: coding 분기 제거
+2. `llm.py`: `should_use_think()` coding 관련 분기 제거
+3. `llm.py`: `build_system_prompt()` coding 분기 제거
+4. 테스트 파일 정리
+5. 검증: "이 코드 버그 있어" 메시지 → room_type = "general", think 미발동
+
+#### 완료 기준
+- `detect_room_type("이 코드 버그 있어")` → `"general"` 반환
+- `should_use_think("함수 만들어줘", interaction_type="coding")` 제거 후 전체 테스트 통과
+- room_change SSE에서 `"coding"` 타입 더 이상 발생하지 않음
+
+---
+
 ## 🔵 Claude Code 상태 (백엔드 + 프론트엔드 전담)
 > 이 섹션은 Claude Code만 수정합니다.
 
@@ -2059,6 +2270,8 @@ Input
 | 자동 채점 worker 모델 분리 | SPEC-04 | MEDIUM |
 | 컨텍스트 파이프라인 무결성 (preference 조용한 실패 등) | SPEC-03 | MEDIUM |
 | 무드 이중 업데이트 UI jitter | SPEC-05 | LOW |
+| 시스템 프롬프트 순서 재배치 + 기억 활용 가이드 | SPEC-08 | MEDIUM |
+| interaction_type "coding" 분기 제거 | SPEC-09 | MEDIUM |
 
 ---
 
