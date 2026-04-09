@@ -97,8 +97,9 @@ async def get_memory_facts(query: str = "", limit: int = 5) -> dict:
 
 
 @router.delete("/memory/facts/{fact_id}")
-async def delete_memory_fact(fact_id: str) -> dict:
-    """특정 장기기억 사실을 삭제한다."""
+async def delete_memory_fact_route(fact_id: str) -> dict:
+    """특정 장기기억 사실을 SQLite + mem0(ChromaDB) 양쪽에서 삭제한다."""
+    # 존재 여부 사전 확인
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT id FROM memory_facts WHERE id = ?", (fact_id,)
@@ -110,9 +111,8 @@ async def delete_memory_fact(fact_id: str) -> dict:
                     "message": "해당 기억을 찾을 수 없어.",
                 })
 
-        await db.execute("DELETE FROM memory_facts WHERE id = ?", (fact_id,))
-        await db.commit()
-
+    from backend.services.memory import delete_memory_fact
+    await delete_memory_fact(fact_id)
     return {"success": True}
 
 

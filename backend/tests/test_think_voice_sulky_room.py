@@ -37,8 +37,13 @@ def use_tmp_db(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def mock_memory_service(monkeypatch):
     import backend.services.memory as svc_mod
+    import backend.services.chat_pipeline as cp_mod
     monkeypatch.setattr(svc_mod, "search_memory", AsyncMock(return_value=[]))
     monkeypatch.setattr(svc_mod, "update_confidence", AsyncMock())
+    monkeypatch.setattr(svc_mod, "add_memory", AsyncMock(return_value=[]))
+    # chat_pipeline은 from-import로 바인딩하므로 해당 모듈 내 참조도 패치
+    monkeypatch.setattr(cp_mod, "search_memory", AsyncMock(return_value=[]))
+    monkeypatch.setattr(cp_mod, "update_confidence", AsyncMock())
 
 
 @pytest.fixture(autouse=True)

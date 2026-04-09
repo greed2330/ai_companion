@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS feedback (
 CREATE_MEMORY_FACTS = """
 CREATE TABLE IF NOT EXISTS memory_facts (
     id                  TEXT PRIMARY KEY,
+    mem0_id             TEXT,
     fact                TEXT NOT NULL,
     embedding           BLOB,
     source_message_id   TEXT REFERENCES messages(id),
@@ -58,6 +59,11 @@ CREATE TABLE IF NOT EXISTS memory_facts (
     last_referenced     TIMESTAMP,
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+"""
+
+CREATE_MEMORY_FACTS_MEM0_IDX = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_facts_mem0_id
+ON memory_facts(mem0_id) WHERE mem0_id IS NOT NULL;
 """
 
 CREATE_MCP_HISTORY = """
@@ -113,6 +119,7 @@ ALL_TABLES = [
     CREATE_MESSAGES,
     CREATE_FEEDBACK,
     CREATE_MEMORY_FACTS,
+    CREATE_MEMORY_FACTS_MEM0_IDX,
     CREATE_MCP_HISTORY,
     CREATE_MINECRAFT_ACTIONS,
     CREATE_VOICE_LOGS,
@@ -126,6 +133,11 @@ _MESSAGES_NEW_COLUMNS = [
     ("screen_context", "TEXT"),
     ("owner_response_delay_ms", "INTEGER"),
     ("owner_emotion", "TEXT"),
+]
+
+# SPEC-02: memory_facts.mem0_id 마이그레이션
+_MEMORY_FACTS_NEW_COLUMNS = [
+    ("mem0_id", "TEXT"),
 ]
 
 
@@ -148,8 +160,21 @@ async def _migrate(db: aiosqlite.Connection) -> None:
             await db.execute(f"ALTER TABLE messages ADD COLUMN {col} {typedef}")
             await db.commit()
         except aiosqlite.OperationalError:
-            # 컬럼이 이미 존재함
             pass
+
+    for col, typedef in _MEMORY_FACTS_NEW_COLUMNS:
+        try:
+            await db.execute(f"ALTER TABLE memory_facts ADD COLUMN {col} {typedef}")
+            await db.commit()
+        except aiosqlite.OperationalError:
+            pass
+
+    # mem0_id UNIQUE INDEX — 이미 있으면 무시
+    try:
+        await db.execute(CREATE_MEMORY_FACTS_MEM0_IDX)
+        await db.commit()
+    except aiosqlite.OperationalError:
+        pass
 
 
 async def get_db() -> aiosqlite.Connection:
