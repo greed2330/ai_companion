@@ -9,7 +9,7 @@ routers/chat.py는 이 모듈에 위임만 한다. 비즈니스 로직 전부 �
   4. 스트리밍 (1st call)
   5. 룸 변경 SSE
   6. done 이벤트 전송
-  7. 백그라운드: 감정 파싱 + 2nd call + SSE emotion_update push + DB 저장
+  7. 백그라운드: 감정 파싱 + motion_lookup + SSE emotion_update push + DB 저장
 """
 
 import asyncio
@@ -26,8 +26,8 @@ from fastapi.responses import StreamingResponse
 
 from backend.models.schema import DB_PATH
 from backend.services.context_builder import build_context
-from backend.services.internal_prompt_builder import build_internal_state_prompt
 from backend.services.llm import postprocess_for_voice
+from backend.services.motion_lookup import get_motion_data
 from backend.services.llm_router import llm_router
 from backend.services.memory import search_memory, update_confidence
 from backend.services.mood import detect_mood_from_text, get_mood, push_event, set_mood
@@ -174,7 +174,7 @@ async def _background_process(
     session_duration: int,
     ctx: dict,
 ) -> None:
-    """스트리밍 완료 후 감정 파싱 / 2nd call / SSE push / DB 저장."""
+    """스트리밍 완료 후 감정 파싱 / motion_lookup / SSE push / DB 저장."""
     if not full_response:
         return
 
@@ -193,29 +193,16 @@ async def _background_process(
         new_mood = EMOTION_TO_MOOD.get(parsed.emotion, "IDLE")
         set_mood(new_mood)
 
-        # 2nd call: 내부 상태 JSON
-        internal_prompt = build_internal_state_prompt(
-            original_message=original_message,
-            full_response=full_response,
-            parsed_emotion=parsed.emotion,
-            audio_features=audio_features,
-            timestamp=timestamp,
-            session_duration=session_duration,
-        )
-        internal = await llm_router.call_for_json(
-            messages=[{"role": "user", "content": internal_prompt}],
-            system_prompt=(
-                "You are HANA's internal monologue generator. Reply with JSON only."
-            ),
-        )
+        # 모션/텐션 — 룩업 테이블 (2nd LLM call 대체)
+        motion_data = get_motion_data(parsed.emotion, parsed.intensity)
 
         # SSE: emotion_update
         push_event({
             "type":             "emotion_update",
             "emotion":          parsed.emotion,
             "mood":             new_mood,
-            "motion_sequence":  internal.get("motion_sequence", []),
-            "tension_level":    internal.get("tension_level", 1.0),
+            "motion_sequence":  motion_data["motion_sequence"],
+            "tension_level":    motion_data["tension_level"],
             "tts_speed":        tts["speed"],
             "tts_pitch":        tts["pitch"],
             "tts_energy":       tts["energy"],
@@ -231,7 +218,7 @@ async def _background_process(
             await collect_experience_background(
                 full_response=full_response,
                 parsed=parsed,
-                internal_json=internal,
+                internal_json=motion_data,
                 audio_features=audio_features,
                 owner_emotion=owner_emotion,
                 timestamp=timestamp,

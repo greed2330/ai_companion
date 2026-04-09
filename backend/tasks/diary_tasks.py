@@ -62,7 +62,7 @@ async def _write_diary_async() -> dict:
     from backend.services.llm_router import llm_router
 
     prompt = _DIARY_PROMPT.format(conversation_summary=summary)
-    diary_text = await llm_router.call_for_text(
+    diary_text = await llm_router.call_for_text_worker(
         messages=[{"role": "user", "content": prompt}],
         system_prompt=(
             "너는 하나야. 오너와 함께한 하루를 자신의 일기로 써. "

@@ -112,7 +112,7 @@ async def _compress_volatile() -> dict:
             f"다음은 하나(AI)의 단기 경험 기록들이야. "
             f"핵심 감정과 상황을 2~3문장으로 요약해줘.\n\n{combined}"
         )
-        summary = await llm_router.call_for_text(
+        summary = await llm_router.call_for_text_worker(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="You are HANA's memory compressor. Reply in Korean only.",
         )

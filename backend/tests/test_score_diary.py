@@ -61,7 +61,9 @@ async def test_score_async_saves_to_dataset():
     from backend.tasks.score_tasks import _score_async
 
     mock_router = MagicMock()
+    mock_router.source = "ollama"
     mock_router.call_for_text = AsyncMock(return_value='{"score": 0.85, "reason": "great"}')
+    mock_router.call_for_text_worker = AsyncMock(return_value='{"score": 0.85, "reason": "great"}')
 
     with patch("backend.tasks.score_tasks.asyncio"), \
          patch("backend.tasks.score_tasks._fetch_existing_feedback", return_value=(None, None)), \
@@ -90,7 +92,9 @@ async def test_score_async_no_save_below_threshold():
     from backend.tasks.score_tasks import _score_async
 
     mock_router = MagicMock()
+    mock_router.source = "ollama"
     mock_router.call_for_text = AsyncMock(return_value='{"score": 0.3, "reason": "poor"}')
+    mock_router.call_for_text_worker = AsyncMock(return_value='{"score": 0.3, "reason": "poor"}')
 
     with patch("backend.tasks.score_tasks._fetch_existing_feedback", return_value=(None, None)), \
          patch("backend.tasks.score_tasks._upsert_feedback", new=AsyncMock()), \
@@ -155,7 +159,9 @@ async def test_write_diary_creates_file(tmp_path):
     import backend.tasks.diary_tasks as dt_mod
 
     mock_router = MagicMock()
+    mock_router.source = "ollama"
     mock_router.call_for_text = AsyncMock(return_value="오늘 주인이랑 많이 얘기했다.")
+    mock_router.call_for_text_worker = AsyncMock(return_value="오늘 주인이랑 많이 얘기했다.")
 
     msgs = [
         {"role": "user", "content": "하나야"},
