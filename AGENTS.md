@@ -296,10 +296,80 @@ Mineflayer로 환경 상태 읽음
 | 암묵적 피드백 수집 | 재질문, 코드 실행 여부, 응답 후 행동 패턴 자동 감지. | 2~ |
 | 명시적 피드백 | 채팅창 👍👎 버튼. 세션 종료 시 1회 평가. | 3~ |
 | LLM 자동 채점 | Qwen3 4B가 응답 품질 백그라운드 자동 채점. Celery 비동기. | 4~ |
-| 데이터 필터링 | 규칙 기반 1차 + LLM 검수 2차 + 샘플 확인 3차. | 5 |
+| 메시지 데이터셋 수집 | final_score >= 0.7인 문답 쌍 → hana_dataset_message 자동 저장. | 4~ |
+| 세션 데이터셋 수집 | 세션 종료 시 주제/감정 아크/하나 발화 샘플 → hana_dataset_session 저장. | 4~ |
+| 데이터셋 통합 | 두 레이어 병합 + 중복 제거 + LLM 재검증 → hana_dataset_final. | 5 |
 | LoRA 파인튜닝 | PC: Unsloth+QLoRA / 맥북: MLX-LM. | 5 |
 | 어댑터 버전 관리 | safetensors 버전별 보관. 롤백 가능. | 5 |
 | Ollama 등록 | 어댑터+베이스 병합 → GGUF 변환 → ollama run hana-vN | 5 |
+
+#### 3-레이어 데이터셋 구조
+
+데이터셋은 목적이 다른 두 레이어로 수집하고, Phase 5에서 하나로 통합한다.
+
+```
+Layer 1: hana_dataset_message          Layer 2: hana_dataset_session
+───────────────────────────────        ───────────────────────────────
+개별 문답 품질 필터링                   세션 전체 흐름 요약
+"이 응답 잘했나?"                       "이 세션에서 하나가 어떤 존재였나?"
+
+수집 시점: 매 응답 직후 (실시간)        수집 시점: 세션 종료 시 (summarize_session)
+저장 위치: ChromaDB hana_dataset_message  저장 위치: ChromaDB hana_dataset_session
+수집 기준: feedback.final_score >= 0.7    수집 기준: 세션 품질 점수 >= 0.6
+
+가르치는 것: 말투, 어휘, 응답 스타일     가르치는 것: 주제별 성격 표현, 감정 연속성
+포맷: {user: "...", assistant: "..."}    포맷: {topic, emotion_arc, voice_samples, ...}
+
+                    ↓                              ↓
+                    └─────────────┬────────────────┘
+                                  ↓
+                    Layer 3: hana_dataset_final
+                    (중복 제거 + LLM 재검증 + JSONL 변환)
+                                  ↓
+                    Phase 5 LoRA 학습
+```
+
+**Layer 2 세션 데이터셋 스키마:**
+```json
+{
+  "session_id": "uuid",
+  "main_topic": "코딩",
+  "duration_min": 42,
+  "message_count": 18,
+  "emotion_arc": ["IDLE", "CURIOUS", "HAPPY", "FOCUSED"],
+  "hana_voice_samples": [
+    "아 그 패턴은 이렇게 하면 더 깔끔해!",
+    "오 진짜? 그거 나도 궁금했어"
+  ],
+  "preference_signal": {"topic": "코딩", "valence": 0.85, "duration_weight": 1.0},
+  "owner_emotion_summary": "집중적, 가끔 막힘",
+  "quality_score": 0.78
+}
+```
+
+> **선호 시스템과 데이터셋은 별개다.**
+> `hana_preference`는 런타임 인격 주입용 (시스템 프롬프트에 반영).
+> `hana_dataset_*`는 LoRA 학습용 (Phase 5에서만 사용).
+
+#### 선호 시스템 설계 (런타임 인격)
+
+선호 신호는 **세션 단위로, 연속 신뢰도 점수**로 누적한다. 메시지 단위 카운트 방식은 주제 분산으로 의미없는 카운트가 쌓이는 문제가 있어 폐기.
+
+```
+세션 종료 시 (summarize_session과 동시 처리):
+  main_topic 추출 (단일 주제)
+  emotional_valence 계산 (-1.0 ~ +1.0)
+  duration_weight 계산 (5분=0.3, 30분=1.0, 60분+=1.2)
+
+  preference_score += valence × duration_weight
+
+  → hana_preference에 저장
+  → confidence 누적 (0.0 → 1.0)
+  → confidence > 0.6: 시스템 프롬프트에 "하나의 성향: ..." 주입
+  → confidence < 0.2: 자동 소멸 (decay)
+```
+
+이 방식으로 "30분 코딩 세션 1번"과 "짧은 코딩 세션 3번"이 동등한 가중치를 가진다.
 
 ### 3-7. 캐릭터 인터랙션 & UX
 
@@ -846,7 +916,7 @@ SET confidence = MIN(1.0, confidence + 0.1),
 WHERE id = ?;
 ```
 
-### 파인튜닝 필터 쿼리
+### 파인튜닝 필터 쿼리 (Layer 1 소스)
 ```sql
 SELECT m.*, f.final_score
 FROM messages m
@@ -857,6 +927,22 @@ WHERE f.final_score >= 0.7
   AND m.interaction_type IS NOT NULL
 ORDER BY f.final_score DESC;
 ```
+> 이 쿼리 결과가 `hana_dataset_message` (ChromaDB Layer 1) 에 자동 저장된다.
+
+### ChromaDB 컬렉션 구조 (Phase 4~5)
+
+| 컬렉션 | 용도 | 수집 시점 | decay |
+|--------|------|----------|-------|
+| `hana_memory_volatile` | 단기 휘발 기억 | 매 대화 | 7일 후 LLM 압축 → longterm |
+| `hana_memory_longterm` | 장기 영구 기억 (오너 정보) | 승격 시 | confidence 0.97배/주 |
+| `hana_experience` | 하나 경험 기록 | 매 대화 종료 | — |
+| `hana_preference` | 선호 신뢰도 (런타임 인격) | 세션 종료 시 | confidence 0.2 미만 소멸 |
+| `hana_dataset_message` | 파인튜닝 데이터 Layer 1 | final_score >= 0.7 즉시 | — |
+| `hana_dataset_session` | 파인튜닝 데이터 Layer 2 | 세션 종료 시 | — |
+| `hana_dataset_final` | 파인튜닝 통합 데이터 | Phase 5 수동 실행 | — |
+
+> HNSW cosine similarity 설정: `hnsw:space=cosine, M=16, construction_ef=100`
+> 모든 컬렉션 공통 적용. 중복 제거 임계값: cosine distance < 0.08 (유사도 > 0.92)
 
 ---
 
@@ -976,17 +1062,50 @@ ORDER BY f.final_score DESC;
 ### Phase 5 — 나를 닮아가는 하나 (데이터 충분히 쌓인 후)
 **목표:** 내 스타일을 학습한 하나 어댑터 v1
 
-**진입 조건:** 대화 메시지 1,000개 이상, final_score 있는 데이터 500개 이상.
+**진입 조건 (두 레이어 모두 충족 시):**
+- Layer 1 (hana_dataset_message): final_score >= 0.7 항목 500개 이상
+- Layer 2 (hana_dataset_session): 세션 요약 100개 이상
+- 조건 확인 스크립트: `finetune/check_dataset_ready.py`
 
-- [ ] 필터링 스크립트 (규칙 기반 1차)
-- [ ] LLM 검수 스크립트 (2차)
-- [ ] JSONL 변환 스크립트 (일기 데이터 포함)
-- [ ] PC: Unsloth + QLoRA 학습 스크립트
-- [ ] 맥북: MLX-LM 학습 스크립트
-- [ ] 어댑터 + 베이스 병합 스크립트
-- [ ] GGUF 변환 스크립트
-- [ ] Ollama Modelfile 작성 + 등록
-- [ ] v1 검증 후 보관
+**Phase 5 흐름:**
+```
+Step 1: 데이터 준비
+  hana_dataset_message 쿼리 (final_score >= 0.7)
+  hana_dataset_session 쿼리 (quality_score >= 0.6)
+  → 두 레이어 병합
+
+Step 2: 품질 재검증
+  규칙 기반 필터 (길이, 언어, 반복 제거)
+  LLM 검수 (Qwen3 4B가 품질 점수 재확인)
+  오너 샘플 확인 (100개 무작위 샘플)
+  → hana_dataset_final 확정
+
+Step 3: JSONL 변환
+  메시지 레이어: instruction-tuning 포맷
+  세션 레이어: 합성 대화 시나리오 포맷
+  일기 데이터 포함 (diary/ 폴더)
+  → finetune/data/hana_train.jsonl
+
+Step 4: LoRA 학습
+  PC: Unsloth + QLoRA (RTX 4070 Ti Super)
+  맥북: MLX-LM (Apple Silicon)
+
+Step 5: 등록
+  어댑터 + 베이스 병합
+  GGUF 변환
+  ollama run hana-v1
+```
+
+**태스크 목록:**
+- [ ] `finetune/check_dataset_ready.py` — 진입 조건 확인 스크립트
+- [ ] `finetune/filter_data.py` — 규칙 기반 1차 필터
+- [ ] `finetune/llm_review.py` — LLM 검수 2차
+- [ ] `finetune/merge_layers.py` — 두 레이어 병합 + 중복 제거
+- [ ] `finetune/convert_jsonl.py` — JSONL 변환 (메시지 + 세션 + 일기)
+- [ ] `finetune/train_unsloth.py` — PC용 QLoRA 학습
+- [ ] `finetune/train_mlx.py` — 맥북용 MLX 학습
+- [ ] `finetune/export_gguf.py` — GGUF 변환 + Ollama 등록
+- [ ] v1 검증 후 `data/adapters/hana-lora-v1.safetensors` 보관
 
 **완료 기준:** `ollama run hana-v1` 동작. 응답 스타일이 나에게 더 맞춰져 있음.
 
@@ -1108,16 +1227,51 @@ ollama run hana-vN
 
 > **Catastrophic Forgetting 방지:** 매 버전은 이전 데이터를 버리지 않고 전체 누적 데이터로 처음부터 재학습.
 
-### 학습 데이터 소스
-1. 대화 히스토리 (messages 테이블, 필터링 후)
-2. 하나 일기 (diary/ 폴더)
-3. 우수 MCP 작업 세션
-4. 마인크래프트 행동 데이터 (minecraft_actions, reward_signal 기반 필터링)
+### 학습 데이터 소스 (3-레이어 구조)
+
+> 상세 설계 → 섹션 3-6 "3-레이어 데이터셋 구조" 참고.
+
+| 레이어 | 저장 위치 | 내용 | 가르치는 것 |
+|--------|-----------|------|------------|
+| **Layer 1** (메시지) | ChromaDB `hana_dataset_message` | 개별 고품질 문답 쌍 | 말투, 어휘, 응답 스타일 |
+| **Layer 2** (세션) | ChromaDB `hana_dataset_session` | 세션 요약 + 감정 아크 + 발화 샘플 | 주제별 성격, 감정 연속성 |
+| **Layer 3** (통합) | ChromaDB `hana_dataset_final` | 두 레이어 병합 + 검증 완료 | 전체 |
+| **보조** | `diary/` 폴더 | 하나 일기 (매일 자정 자동 생성) | 하나 시점 서술 스타일 |
+| **보조** | `minecraft_actions` 테이블 | 마인크래프트 행동 데이터 | 게임 맥락 반응 패턴 |
 
 ### 피드백 수집 3계층
+
 1. **암묵적 (자동):** 재질문, 코드 실행 여부, 응답 후 행동 자동 감지.
 2. **명시적 (선택):** 👍👎 버튼. 세션 종료 시 1회 평가.
 3. **자동 채점 (백그라운드):** Qwen3 4B가 응답 품질 자동 채점 → `auto_score`.
+
+```
+final_score = (explicit_score × 0.4)
+            + (auto_score × 0.4)
+            + (implicit_signal_score × 0.2)
+
+final_score >= 0.7 → Layer 1 (hana_dataset_message) 자동 저장
+```
+
+### 데이터 수집 타임라인
+
+```
+대화 중 (실시간)
+  └─ 매 응답 후: auto_score 계산 → final_score 업데이트
+                final_score >= 0.7 → Layer 1 저장
+
+세션 종료 시 (Celery: summarize_session)
+  └─ 세션 요약 생성 → Layer 2 저장
+     선호 신뢰도 업데이트 → hana_preference
+
+매일 자정 (Celery: diary_tasks)
+  └─ 하나 일기 자동 작성 → diary/ 저장
+
+Phase 5 진입 시 (수동 실행)
+  └─ Layer 1 + Layer 2 + 일기 병합
+     LLM 재검증 → Layer 3 확정
+     JSONL 변환 → LoRA 학습
+```
 
 ---
 

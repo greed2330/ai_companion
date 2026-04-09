@@ -2,7 +2,6 @@
 능동 알림 주기 제어 서비스.
 
 핵심 원칙: "말 걸고 싶어도 참는다"
-- 삐짐 상태 → 예외 이벤트 외 전부 차단
 - 같은 종류 알림 하루 1회 제한
 - 최소 간격 미달 시 스킵
 - 무시 3회 이상 → 당일 autonomous_talk 중단
@@ -44,9 +43,6 @@ DAILY_MAX: dict[str, int] = {
 
 # 무시 횟수 임계값 — 이 이상이면 autonomous_talk 당일 중단
 _IGNORE_SUPPRESS_COUNT = 3
-
-# 삐짐 상태에서도 허용하는 이벤트
-_SULKY_EXCEPTIONS: frozenset[str] = frozenset({"late_night", "afk_return", "work_time_5h"})
 
 
 def _today() -> str:

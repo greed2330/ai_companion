@@ -34,5 +34,15 @@ celery_app.conf.update(
             "task": "decay_tasks.run_confidence_decay",
             "schedule": crontab(hour=0, minute=0),
         },
+        # 매일 새벽 1시 단기 기억 압축 (7일 이상 된 volatile → longterm 이관)
+        "daily-volatile-compress": {
+            "task": "decay_tasks.compress_volatile_memories",
+            "schedule": crontab(hour=1, minute=0),
+        },
+        # 매일 23:59 하나 일기 자동 작성
+        "daily-diary": {
+            "task": "diary_tasks.write_daily_diary",
+            "schedule": crontab(hour=23, minute=59),
+        },
     },
 )

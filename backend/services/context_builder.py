@@ -29,6 +29,7 @@ async def build_context(
     session_duration: int = 0,
     is_first_message: bool = False,
     memories: Optional[list[dict]] = None,
+    session_hint: str = "",
 ) -> dict:
     """
     LLM 호출에 필요한 컨텍스트를 구성한다.
@@ -45,19 +46,14 @@ async def build_context(
     visual_context   : OCR/Vision 화면 설명 (Phase 4)
     session_duration : 세션 경과 시간 (분)
     is_first_message : 이 대화의 첫 메시지 여부
-    memories         : 이미 검색된 장기기억 목록 (없으면 DB 조회)
+    memories         : 이미 검색된 장기기억 목록 (pipeline이 반드시 넘길 것)
+    session_hint     : judge_session_start()가 반환한 system_hint (pipeline이 넘김)
 
     Returns
     -------
     dict with keys: system_prompt, use_think, extra_context
     """
     from backend.services.llm import build_system_prompt, should_use_think
-    from backend.services.sulky_service import is_sulky
-
-    # 메모리가 없으면 DB 조회
-    if memories is None:
-        from backend.services.memory import search_memory
-        memories = await search_memory(_OWNER_USER_ID, message)
 
     memory_list = [m["fact"] for m in memories] if memories else None
 
@@ -67,21 +63,28 @@ async def build_context(
     try:
         from backend.services.preference_service import preference_system  # type: ignore[import]
         preferences = await preference_system.get_context_string()
-    except (ImportError, AttributeError):
-        pass
+    except ImportError:
+        logger.debug("preference_service: Phase 미구현 상태")
+    except AttributeError as e:
+        logger.error("preference_service.get_context_string() 인터페이스 불일치: %s", e)
+    except Exception as e:
+        logger.error("preference_system 호출 실패: %s", e)
 
     try:
         from backend.services.philosophy_service import build_philosophy_context  # type: ignore[import]
         philosophy = await build_philosophy_context()
-    except (ImportError, AttributeError):
-        pass
+    except ImportError:
+        logger.debug("philosophy_service: Phase 미구현 상태")
+    except AttributeError as e:
+        logger.error("philosophy_service.build_philosophy_context() 인터페이스 불일치: %s", e)
+    except Exception as e:
+        logger.error("philosophy_service 호출 실패: %s", e)
 
     system_prompt = build_system_prompt(
         mood=mood,
         persona=persona,
         interaction_type=interaction_type,
         voice_mode=voice_mode,
-        sulky=is_sulky(),
         memories=memory_list,
         preferences=preferences,
         philosophy=philosophy,
@@ -92,29 +95,26 @@ async def build_context(
     if audio_features:
         e = audio_features.get("energy", 1.0)
         if e < 0.4:
-            situation.append("Voice: low energy")
+            situation.append("음성: 기운 없음 (낮은 에너지)")
         elif e > 0.9:
-            situation.append("Voice: energetic")
+            situation.append("음성: 활기참 (높은 에너지)")
         if audio_features.get("rising_tone"):
-            situation.append("Rising tone detected")
+            situation.append("어조 상승 (질문 또는 불확실함)")
     if visual_context:
-        situation.append(f"Screen: {visual_context}")
-    if session_duration > 120:
-        situation.append(f"Session: {session_duration}min")
+        situation.append(f"화면: {visual_context}")
+    if session_duration >= 60:
+        situation.append(f"세션 경과: {session_duration}분")
     if owner_emotion not in ("NEUTRAL", None, ""):
-        situation.append(f"Owner emotion: {owner_emotion}")
-    if situation:
-        system_prompt += "\n\n## Current Situation\n" + "\n".join(f"- {s}" for s in situation)
-
-    # 세션 시작 힌트 (첫 메시지에만)
-    if is_first_message:
-        from backend.services.session_judge import judge_session_start
-        session_ctx = judge_session_start(
-            first_message=message,
-            audio_energy=audio_features.get("energy") if audio_features else None,
+        emotion_kr = {"HAPPY": "기쁨/흥분", "DISTRESSED": "힘듦/걱정"}.get(
+            owner_emotion, owner_emotion
         )
-        if session_ctx.system_hint:
-            system_prompt += f"\n\n## Session Context\n{session_ctx.system_hint}"
+        situation.append(f"오너 현재 감정: {emotion_kr}")
+    if situation:
+        system_prompt += "\n\n## 현재 상황\n" + "\n".join(f"- {s}" for s in situation)
+
+    # 세션 시작 힌트: pipeline이 넘겨준 session_hint를 그대로 주입
+    if is_first_message and session_hint:
+        system_prompt += f"\n\n## Session Context\n{session_hint}"
 
     use_think = should_use_think(message, interaction_type)
     if voice_mode:

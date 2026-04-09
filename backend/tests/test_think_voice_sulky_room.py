@@ -1,10 +1,9 @@
 """
-think 동적 제어 / 음성 모드 / 삐짐 상태 / 룸 감지 테스트.
+think 동적 제어 / 음성 모드 / 룸 감지 테스트.
 
 커버 범위:
 - should_use_think: 캐주얼/코딩 메시지 판단
 - postprocess_for_voice: 길이 제한, 이모지 제거
-- sulky_service: trigger / resolve / check_reconcile / can_trigger 차단
 - room_service: detect_room_type 키워드 분류
 - build_system_prompt: 시스템 프롬프트 내용 검증
 - /settings/persona preview 엔드포인트
@@ -38,8 +37,13 @@ def use_tmp_db(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def mock_memory_service(monkeypatch):
     import backend.services.memory as svc_mod
+    import backend.services.chat_pipeline as cp_mod
     monkeypatch.setattr(svc_mod, "search_memory", AsyncMock(return_value=[]))
     monkeypatch.setattr(svc_mod, "update_confidence", AsyncMock())
+    monkeypatch.setattr(svc_mod, "add_memory", AsyncMock(return_value=[]))
+    # chat_pipeline은 from-import로 바인딩하므로 해당 모듈 내 참조도 패치
+    monkeypatch.setattr(cp_mod, "search_memory", AsyncMock(return_value=[]))
+    monkeypatch.setattr(cp_mod, "update_confidence", AsyncMock())
 
 
 @pytest.fixture(autouse=True)
@@ -48,16 +52,6 @@ def reset_mood():
     mood_mod._current_mood = "IDLE"
     yield
     mood_mod._current_mood = "IDLE"
-
-
-@pytest.fixture(autouse=True)
-def reset_sulky():
-    import backend.services.sulky_service as sulky_mod
-    sulky_mod._sulky = False
-    sulky_mod._since = None
-    yield
-    sulky_mod._sulky = False
-    sulky_mod._since = None
 
 
 @pytest.fixture(autouse=True)
@@ -175,70 +169,6 @@ def test_voice_short_text_unchanged():
     assert "안녕" in result
 
 
-# ── sulky_service ───────────────────────────────────────────────
-
-
-def test_sulky_initial_false():
-    """초기 상태는 삐짐 아님."""
-    from backend.services.sulky_service import is_sulky
-    assert is_sulky() is False
-
-
-def test_sulky_trigger():
-    """trigger_sulky() 호출 후 is_sulky() == True."""
-    from backend.services.sulky_service import is_sulky, trigger_sulky
-    trigger_sulky()
-    assert is_sulky() is True
-
-
-def test_sulky_resolve():
-    """resolve_sulky() 호출 후 is_sulky() == False."""
-    from backend.services.sulky_service import is_sulky, resolve_sulky, trigger_sulky
-    trigger_sulky()
-    resolve_sulky()
-    assert is_sulky() is False
-
-
-def test_reconcile_resolves_sulky():
-    """'미안해' 메시지가 삐짐 상태를 해제한다."""
-    from backend.services.sulky_service import check_reconcile, is_sulky, trigger_sulky
-    trigger_sulky()
-    result = check_reconcile("미안해, 내가 잘못했어")
-    assert result is True
-    assert is_sulky() is False
-
-
-def test_reconcile_no_keyword():
-    """화해 키워드 없으면 삐짐 상태 유지."""
-    from backend.services.sulky_service import check_reconcile, is_sulky, trigger_sulky
-    trigger_sulky()
-    result = check_reconcile("그냥 얘기해줘")
-    assert result is False
-    assert is_sulky() is True
-
-
-@pytest.mark.asyncio
-async def test_sulky_blocks_proactive(use_tmp_db):
-    """삐짐 상태에서 autonomous_talk는 차단된다."""
-    from backend.services.sulky_service import trigger_sulky
-    from backend.services.proactive_service import can_trigger
-    trigger_sulky()
-    result = await can_trigger("autonomous_talk")
-    assert result is False
-
-
-@pytest.mark.asyncio
-async def test_sulky_allows_exceptions(use_tmp_db):
-    """삐짐 상태에서도 late_night는 허용된다."""
-    from backend.models.schema import init_db
-    from backend.services.sulky_service import trigger_sulky
-    from backend.services.proactive_service import can_trigger
-    await init_db()
-    trigger_sulky()
-    result = await can_trigger("late_night")
-    assert result is True
-
-
 # ── room_service ────────────────────────────────────────────────
 
 
@@ -278,20 +208,13 @@ def test_system_prompt_clean():
     """
     from backend.services.llm import build_system_prompt
     prompt = build_system_prompt()
-    # 자연어 말투 지시가 있어야 함
-    assert "말투 규칙" in prompt
+    # 말투 지시가 있어야 함 (기본 말투 섹션)
+    assert "기본 말투" in prompt
     # 금지 목록이 명시되어 있어야 함
     assert "절대 금지" in prompt
     # Good/Bad 예시가 있어야 함
     assert "Good:" in prompt
     assert "Bad:" in prompt
-
-
-def test_system_prompt_sulky():
-    """삐짐 상태 프롬프트에 삐짐 지시문이 포함된다."""
-    from backend.services.llm import build_system_prompt
-    prompt = build_system_prompt(sulky=True)
-    assert "삐진 상태" in prompt
 
 
 def test_system_prompt_voice_mode():

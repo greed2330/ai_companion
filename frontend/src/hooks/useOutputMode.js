@@ -4,13 +4,10 @@ import {
   detectBubbleType,
   getBubbleDuration
 } from "../constants/outputModes";
-
-const defaultTtsService = {
-  speak: async () => {}
-};
+import { ttsService as sharedTtsService } from "../services/tts";
 
 export function useOutputMode(settings, options = {}) {
-  const ttsService = options.ttsService || defaultTtsService;
+  const ttsService = options.ttsService || sharedTtsService;
   const bubbleApi = options.bubbleApi || window.hanaDesktop;
 
   async function handleResponse(text, actionType, ttsParams = {}, onChatText) {

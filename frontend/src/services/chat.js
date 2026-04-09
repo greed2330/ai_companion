@@ -29,7 +29,7 @@ export async function streamChat({
   });
 
   if (!response.ok || !response.body) {
-    throw new Error("채팅 스트리밍을 시작할 수 없어.");
+    throw new Error("채팅 스트림을 시작할 수 없어요.");
   }
 
   const reader = response.body.getReader();
@@ -70,7 +70,7 @@ export async function streamChat({
       }
 
       if (event.type === "error") {
-        throw new Error(event.message || "응답 중 오류가 발생했어.");
+        throw new Error(event.message || "응답을 받는 중 오류가 발생했어요.");
       }
     }
   }

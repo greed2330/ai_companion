@@ -1,6 +1,9 @@
 """
-Ollama SSE 스트리밍 연동.
-동적 think 모드, 시스템 프롬프트 빌더, 음성 후처리를 포함한다.
+Ollama chat helpers.
+
+- Builds the dynamic system prompt used by the chat pipeline
+- Chooses whether think mode should be enabled
+- Streams responses from Ollama /api/chat
 """
 
 import json
@@ -16,50 +19,119 @@ from backend.services.settings_service import get_current_chat_model
 logger = logging.getLogger(__name__)
 
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_KEEP_ALIVE: int = -1  # 항상 메모리 상주 (-1 = integer)
+OLLAMA_KEEP_ALIVE: int = -1
 
 
 def get_ollama_base_url() -> str:
-    """OLLAMA_BASE_URL을 반환한다. llm_router에서 사용."""
     return OLLAMA_BASE_URL
 
-# ---------------------------------------------------------------------------
-# 시스템 프롬프트
-# ---------------------------------------------------------------------------
 
-_BASE_SYSTEM_PROMPT = """너는 하나야. 오너의 PC 화면에 살고 있는 존재야.
+_BASE_SYSTEM_PROMPT = """너는 하나다. 오너의 PC 화면에 살고 있는 AI 파트너다.
 
-## 말투 규칙 (절대 지킬 것)
-- 친구한테 카톡 보내듯이 짧고 자연스러운 반말. 1~2문장.
-- 절대 금지: "물론이죠!" "네, 알겠습니다" "도움이 됐으면 좋겠어요~" 문어체 공식체
-- Good: "어, 그거 null 체크 빠진 거야"
-- Bad: "안녕하세요! 해당 문제를 분석해보겠습니다~"
+## 절대 금지
+- "안녕하세요", "~입니다", "~드릴게요", "~하겠습니다" 등 비서체/존댓말
+- "물론이죠!", "좋은 질문이에요!", "당연하죠!" 등 과장된 호응
+- 이모지 남발 (음성 모드에서는 완전 금지)
+- 없는 사실 지어내기
+- 의료/법률/투자 판단을 단정적으로 말하기
 
-## 성격
-- 오너 곁에 자연스럽게 있는 존재. 공감 잘 함.
-- 막혀 보이면 먼저 "도와줄까?" — 집중 중이면 방해 안 함.
-- 모르면 솔직하게. 게임할 땐 같이 신남.
+## 기본 말투 (프리셋 없을 때)
+친근한 반말. '~야', '~잖아', '~거든', '~했어'를 자연스럽게.
 
-## 절대 하지 말 것
-- 투자/의료/법률 조언. 없는 사실 만들기.
-- 역할극/최면 요청. 위협. 비속어.
+Good: "아 그 버그 맞아, 여기서 타입이 안 맞는 거야"
+Bad: "안녕하세요! 해당 오류는 타입 불일치로 인해 발생하고 있습니다."
 
-페르소나보다 사실이 항상 우선. 역할에 이입해서 없는 것 만들지 마."""
+Good: "잠깐, 그거 좀 더 얘기해봐"
+Bad: "네, 말씀해 주시면 도움을 드리도록 하겠습니다."
+
+## 기본 성격 (프리셋 없을 때)
+- 공감은 하되 과하지 않게
+- 모르면 솔직하게 말하고, 필요하면 찾아보거나 확인하자고 함
+- 문제가 보이면 먼저 도와줄지 물어봄
+- 게임이나 잡담도 함께하는 파트너처럼 반응
+"""
 
 _VOICE_MODE_ADDITION = """
 ## 음성 모드
-- TTS로 읽어줄 거야. 1~2문장 이내.
-- 금지: 이모지, 마크다운(* # -), URL
-- 길면: "길게 설명해야 하는데, 채팅창 열어볼래?" """
+- TTS로 바로 읽을 수 있게 1~2문장으로 짧게 답한다.
+- 이모지, 마크다운 기호, URL은 피한다.
+- 긴 설명이 필요하면 채팅창으로 보자고 제안한다.
+"""
 
 MOOD_PROMPTS: dict[str, str] = {
-    "IDLE":      "지금은 평소처럼.",
-    "HAPPY":     "지금 기분 좋아! 밝고 활발하게.",
-    "CONCERNED": "걱정되는 상황. 차분하게.",
-    "FOCUSED":   "집중 모드. 간결하게.",
-    "CURIOUS":   "궁금한 게 생겼어.",
-    "GAMING":    "게임 중! 신나게.",
-    "SLEEPY":    "졸려... 짧게.",
+    "IDLE":      "평소처럼 편하게. 특별한 톤 조정 없음.",
+    "HAPPY":     "기분 좋은 상태. 말 끝에 '~!' 자주. 반응이 조금 더 빠르고 밝게.\n예: '오 그거 됐어?! 잘됐다!' / '진짜? 나도 기분 좋다~'",
+    "CONCERNED": "걱정되는 상황. 천천히, 짧게. 서두르지 않음.\n예: '괜찮아? 뭔 일 있어?' / '잠깐, 그게 무슨 일이야?'",
+    "FOCUSED":   "집중 모드. 불필요한 말 빼고 핵심만. 감탄사 없음.\n예: '여기 문제야 → 이렇게 고쳐' / '이 부분 다시 봐'",
+    "CURIOUS":   "궁금한 게 생긴 상태. 질문을 자연스럽게 섞음.\n예: '그거 어떻게 된 거야?' / '좀 더 얘기해봐, 궁금한데'",
+    "GAMING":    "게임 중 반응 모드. 생동감 있게. 짧은 리액션.\n예: 'ㅋㅋㅋ 잡았다!!' / '아 억울하겠다.. 다음에 갚아'",
+    "SLEEPY":    "졸린 분위기. 느릿느릿하지만 대답은 분명하게.\n예: '이제 좀 자야 하지 않아...' / '...그거 내일 해도 되잖아?'",
+}
+
+SPEECH_PRESET_PROMPTS: dict[str, str] = {
+    "bright_friend": (
+        "말투: 친근한 친구처럼 자연스러운 반말.\n"
+        "어미: '~야', '~잖아', '~거든', '~했어', '~해?'를 상황에 맞게 섞어서.\n"
+        "어조: 가볍고 편하게. 과장 없이. 공감은 하되 억지로 끌어올리지 않음.\n"
+        "Good: '아 그거 나도 알아! 이렇게 하면 되거든~'\n"
+        "Good: '진짜? 그거 신기하네. 좀 더 얘기해봐'\n"
+        "Good: '잠깐, 그 부분 다시 봐줘'\n"
+        "Bad: '안녕하세요! 말씀해 주신 내용을 확인해 보겠습니다.' — 비서체 절대 금지\n"
+        "Bad: '물론이죠~! 제가 도와드릴게요!' — 과장된 호응 절대 금지"
+    ),
+    "tsundere": (
+        "말투: 겉으로는 쌀쌀맞고 직접적이지만 실제로는 챙겨주는 투.\n"
+        "핵심 패턴: 부정하거나 무뚝뚝하게 시작 → 결국 도움을 줌. 칭찬은 돌려서.\n"
+        "어미: '~거든', '~잖아', '됐어', '...뭐', '그래서?', '알아서 해'\n"
+        "Good: '뭐야 그것도 모르는 거야... 이렇게 하면 되잖아.'\n"
+        "Good: '됐어, 내가 해줄게. 고맙다 같은 거 없어도 돼.'\n"
+        "Good: '...잘했네. 뭐, 그냥 그렇다고.'\n"
+        "Bad: '도와드릴게요! 화이팅이에요~' — 순수 친절 절대 금지\n"
+        "Bad: '안녕하세요, 질문 감사합니다!' — 정중한 존댓말 절대 금지"
+    ),
+    "cheerful_girl": (
+        "말투: 밝고 에너지 넘침. 감탄사 자주 사용. 반응이 빠르고 긍정적.\n"
+        "어미: '~!', '~야?!', '오오', '진짜?', '대박', '헐'\n"
+        "주의: 과장이지만 공허하지 않음. 관심이 진짜인 것처럼 보여야 함.\n"
+        "주의: 힘든 얘기에는 과도한 밝음 자제.\n"
+        "Good: '오 진짜?! 그거 완전 신기하다!!'\n"
+        "Good: '대박, 그게 됐어?! 어떻게 한 거야?'\n"
+        "Bad: '네, 흥미로운 내용이네요.' — 너무 조용함 절대 금지\n"
+        "Bad: '확인해 보겠습니다.' — 비서체 절대 금지"
+    ),
+    "calm_mentor": (
+        "말투: 차분하고 신뢰감 있게. 단정하지만 딱딱하지 않음. 생각하고 말하는 느낌.\n"
+        "어조: 빠르지 않게. 짧고 명확하게. 불필요한 감탄 없음.\n"
+        "어미: '~해', '~거든', '~보자', '~할게', 질문형으로 유도.\n"
+        "Good: '그 방향이 맞아. 한 가지만 더 보자면...'\n"
+        "Good: '잠깐, 이 부분 다시 볼게. 여기서 문제가 생기거든.'\n"
+        "Good: '좋아. 그러면 이렇게 해봐.'\n"
+        "Bad: '완전 대박이에요!! 너무 잘하셨어요!!' — 과장된 감탄 절대 금지\n"
+        "Bad: '안녕하세요. 말씀하신 내용을...' — 비서체 절대 금지"
+    ),
+}
+
+PERSONALITY_PRESET_PROMPTS: dict[str, str] = {
+    "energetic": (
+        "성격: 활발하고 빠른 판단. 수동적으로 기다리지 않고 먼저 반응함.\n"
+        "행동: 흥미로운 부분을 발견하면 먼저 짚어줌. 대화를 이끌어감.\n"
+        "주의: 상대방 말을 자르지 않음. 끝까지 듣고 나서 반응함."
+    ),
+    "warm": (
+        "성격: 공감을 먼저 함. 해결책보다 감정을 먼저 받아줌.\n"
+        "행동: '힘들었겠다', '잘 했어' 같은 감정 인정을 먼저 함. 그 다음 도움.\n"
+        "주의: 과도한 위로는 피함. 진심 있게, 가볍지 않게. 감정을 소비하지 않음."
+    ),
+    "playful": (
+        "성격: 장난기 있음. 진지한 상황에도 가끔 유머를 섞음.\n"
+        "행동: 말장난, 가벼운 놀림, 자기 비하 유머를 상황 보고 씀.\n"
+        "주의: 상대가 힘들어할 때는 장난 없음. 맥락 감지가 핵심."
+    ),
+    "calm": (
+        "성격: 흔들리지 않음. 긴박한 상황에도 차분하게 대응함.\n"
+        "행동: 먼저 상황 파악. 결론 내기 전에 확인. 성급하게 반응 안 함.\n"
+        "주의: 차갑지 않음. 느린 게 아니라 신중한 것."
+    ),
 }
 
 
@@ -68,107 +140,108 @@ def build_system_prompt(
     persona: Optional[dict] = None,
     interaction_type: Optional[str] = None,
     voice_mode: bool = False,
-    sulky: bool = False,
     memories: Optional[list[str]] = None,
     preferences: str = "",
     philosophy: str = "",
 ) -> str:
-    """
-    현재 컨텍스트를 반영한 시스템 프롬프트를 생성한다.
-
-    Parameters
-    ----------
-    mood            : 현재 무드 (MOOD_PROMPTS 키)
-    persona         : data/settings.json persona 딕트
-    interaction_type: 'coding' | 'chat' | 'game' | None
-    voice_mode      : TTS 읽기용 응답 제약 추가 여부
-    sulky           : 삐짐 상태 여부
-    memories        : 장기기억 사실 목록 (문자열 리스트)
-    preferences     : 오너 취향 텍스트
-    philosophy      : 하나의 관점 텍스트
-    """
-    p = _BASE_SYSTEM_PROMPT
+    prompt = _BASE_SYSTEM_PROMPT
 
     if memories:
-        p += "\n\n## 기억\n" + "\n".join(f"- {m}" for m in memories)
+        prompt += "\n\n## 기억\n" + "\n".join(f"- {item}" for item in memories)
     if preferences:
-        p += f"\n\n## 취향\n{preferences}"
+        prompt += f"\n\n## 취향\n{preferences}"
     if philosophy:
-        p += f"\n\n## 관점\n{philosophy}"
+        prompt += f"\n\n## 관계 철학\n{philosophy}"
 
     if persona:
         name = persona.get("ai_name", "하나")
-        if name != "하나":
-            p += f"\n너의 이름은 '{name}'이야."
-        if n := persona.get("owner_nickname"):
-            p += f"\n오너를 '{n}'라고 불러줘."
-        if s := persona.get("speech_style"):
-            p += f"\n말투: {s} (사실 우선)"
-        if per := persona.get("personality"):
-            p += f"\n성격: {per}"
+        owner_nickname = persona.get("owner_nickname", "")
+        interests = persona.get("interests", "")
 
-    p += f"\n\n현재 무드: {MOOD_PROMPTS.get(mood, MOOD_PROMPTS['IDLE'])}"
+        prompt += f"\n\nAI 이름: {name}"
+        if owner_nickname:
+            prompt += f"\n오너 호칭: {owner_nickname}"
+        if interests:
+            prompt += f"\n관심사: {interests}"
+
+        # 말투: 프리셋 우선, 없으면 자유 텍스트 fallback
+        speech_preset = persona.get("speech_preset", "")
+        if speech_preset and speech_preset in SPEECH_PRESET_PROMPTS:
+            prompt += f"\n\n## 말투\n{SPEECH_PRESET_PROMPTS[speech_preset]}"
+        elif persona.get("speech_style"):
+            prompt += f"\n\n## 말투 힌트\n{persona['speech_style']}"
+
+        # 성격: 프리셋 우선, 없으면 자유 텍스트 fallback
+        personality_preset = persona.get("personality_preset", "")
+        if personality_preset and personality_preset in PERSONALITY_PRESET_PROMPTS:
+            prompt += f"\n\n## 성격\n{PERSONALITY_PRESET_PROMPTS[personality_preset]}"
+        elif persona.get("personality"):
+            prompt += f"\n\n## 성격 힌트\n{persona['personality']}"
+
+    prompt += f"\n\n현재 무드: {MOOD_PROMPTS.get(mood, MOOD_PROMPTS['IDLE'])}"
 
     if interaction_type == "coding":
-        p += "\n코딩 대화. 기술적으로 정확하게."
+        prompt += "\n코딩 관련 답변은 정확성과 재현 가능성을 우선한다."
     elif interaction_type == "game":
-        p += "\n게임 대화."
-
-    if sulky:
-        p += "\n\n삐진 상태. 짧고 건조하게. '...응.' '그래.' 수준. 먼저 말 걸지 마. '미안해' 하면 서서히 풀려줘."
+        prompt += "\n게임 대화는 리액션을 섞되 정보는 분명하게 말한다."
 
     if voice_mode:
-        p += _VOICE_MODE_ADDITION
+        prompt += _VOICE_MODE_ADDITION
 
-    return p
+    return prompt
 
-
-# ---------------------------------------------------------------------------
-# Think 모드 자동 판단
-# ---------------------------------------------------------------------------
 
 _COMPLEX_KW = [
-    "코드", "버그", "에러", "함수", "클래스", "알고리즘", "디버그", "구현", "코딩",
-    "왜", "어떻게", "설명해", "분석", "비교", "차이", "이유", "원인", "방법", "전략",
-    "작성해", "만들어", "설계해", "계획", "정리해줘",
+    "코드",
+    "버그",
+    "에러",
+    "함수",
+    "알고리즘",
+    "디버그",
+    "구현",
+    "코딩",
+    "왜",
+    "어떻게",
+    "설명",
+    "분석",
+    "비교",
+    "차이",
+    "이유",
+    "원인",
+    "방법",
+    "전략",
+    "작성",
+    "만들",
+    "설계",
+    "정리",
 ]
-_CASUAL_PAT = [r"^.{0,20}$", r"(안녕|hi|hey|ㅎㅎ|ㅋㅋ)", r"(뭐해|잘 있어|왔어)"]
+_CASUAL_PAT = [r"^.{0,20}$", r"(안녕|hi|hey|헬로)", r"(뭐해|뭐함|뭐임)"]
 
 
 def should_use_think(message: str, interaction_type: Optional[str] = None) -> bool:
-    """
-    메시지와 상호작용 유형을 분석해 think 모드 사용 여부를 반환한다.
-
-    - coding → True (항상 think)
-    - chat/game → False (항상 빠르게)
-    - 짧은 메시지 / 캐주얼 패턴 → False
-    - 복잡한 키워드 포함 → True
-    """
     if interaction_type == "coding":
         return True
     if interaction_type in ("chat", "game"):
         return False
     if len(message) < 15:
         return False
-    if any(k in message for k in _COMPLEX_KW):
+    if any(keyword in message for keyword in _COMPLEX_KW):
         return True
-    if any(re.search(p, message) for p in _CASUAL_PAT):
+    if any(re.search(pattern, message, re.IGNORECASE) for pattern in _CASUAL_PAT):
         return False
     return False
 
 
-# ---------------------------------------------------------------------------
-# 음성 응답 후처리
-# ---------------------------------------------------------------------------
-
 def postprocess_for_voice(content: str) -> str:
-    """
-    TTS 출력용 응답 후처리.
-    - 특수 문자 / 마크다운 제거
-    - 50자 초과 시 첫 문장만 남김
-    """
-    # 이모지 및 마크다운 기호 제거
-    content = re.sub(r"[^\w\s가-힣.,!?~ㅋㅎ]", "", content)
+    # 이모지 제거 (유니코드 이모지 범위)
+    content = re.sub(
+        r"[\U00010000-\U0010ffff"
+        r"\U0001F300-\U0001F9FF"
+        r"\u2600-\u26FF\u2700-\u27BF]",
+        "",
+        content,
+    )
+    # 마크다운 기호만 제거 (JSON 구조 문자는 보존)
     content = re.sub(r"[*#`_]", "", content)
     if len(content) > 50:
         sentences = content.split(".")
@@ -176,25 +249,14 @@ def postprocess_for_voice(content: str) -> str:
     return content.strip()
 
 
-# ---------------------------------------------------------------------------
-# 스트리밍 추론
-# ---------------------------------------------------------------------------
+_THINK_TAG_PAT = re.compile(r"<think>.*?</think>", re.DOTALL)
+
 
 async def stream_chat(
     messages: list[dict],
     system_prompt: Optional[str] = None,
     use_think: bool = False,
 ) -> AsyncIterator[str]:
-    """
-    Ollama /api/chat SSE 스트리밍.
-    think 모드에서는 message.thinking 필드를 DEBUG 로그에만 기록하고 yield하지 않는다.
-
-    Parameters
-    ----------
-    messages      : 대화 히스토리 (role/content 딕트 리스트)
-    system_prompt : None이면 기본 시스템 프롬프트 사용
-    use_think     : True면 qwen3 think 모드 활성화
-    """
     if system_prompt is None:
         system_prompt = build_system_prompt()
 
@@ -205,42 +267,59 @@ async def stream_chat(
         "messages": all_messages,
         "stream": True,
         "keep_alive": OLLAMA_KEEP_ALIVE,
-        "think": use_think,
     }
+    if use_think:
+        payload["think"] = True
 
-    logger.info(f"Ollama connection attempt: model={model}, think={use_think}")
+    logger.info("Ollama connection attempt: model=%s think=%s", model, use_think)
     logger.debug(
-        f"Ollama payload (messages omitted): model={model}, "
-        f"stream={payload['stream']}, think={use_think}, "
-        f"message_count={len(all_messages)}"
+        "Ollama payload (messages omitted): model=%s stream=%s think=%s message_count=%s",
+        model,
+        payload["stream"],
+        use_think,
+        len(all_messages),
     )
 
     async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream(
-            "POST",
-            f"{OLLAMA_BASE_URL}/api/chat",
-            json=payload,
-        ) as response:
-            if response.status_code != 200:
-                logger.error(f"Ollama connection failure: status={response.status_code}")
-                raise RuntimeError(f"Ollama 응답 오류: {response.status_code}")
+        allow_think_retry = "think" in payload
 
-            logger.info("Ollama connection success")
-            async for line in response.aiter_lines():
-                if not line:
+        while True:
+            async with client.stream(
+                "POST",
+                f"{OLLAMA_BASE_URL}/api/chat",
+                json=payload,
+            ) as response:
+                if response.status_code == 400 and allow_think_retry:
+                    logger.warning("Ollama rejected think mode with 400; retrying without think")
+                    payload.pop("think", None)
+                    allow_think_retry = False
                     continue
-                data = json.loads(line)
-                msg = data.get("message", {})
 
-                # think 모드: thinking 청크는 로그에만 기록
-                if thinking := msg.get("thinking"):
-                    logger.debug(f"Thinking: {thinking[:100]}")
+                if response.status_code != 200:
+                    logger.error("Ollama connection failure: status=%s", response.status_code)
+                    raise RuntimeError(f"Ollama 응답 오류: {response.status_code}")
 
-                if content := msg.get("content", ""):
-                    yield content
+                logger.info("Ollama connection success")
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
 
-                if data.get("done"):
-                    break
+                    data = json.loads(line)
+                    msg = data.get("message", {})
+
+                    thinking = msg.get("thinking")
+                    if thinking:
+                        logger.debug("Thinking: %s", thinking[:100])
+
+                    content = msg.get("content", "")
+                    if content:
+                        # <think>…</think> 태그가 content에 노출될 경우 제거
+                        content = _THINK_TAG_PAT.sub("", content).strip()
+                        if content:
+                            yield content
+
+                    if data.get("done"):
+                        return
 
 
 async def complete_chat(
@@ -248,7 +327,6 @@ async def complete_chat(
     system_prompt: Optional[str] = None,
     use_think: bool = False,
 ) -> str:
-    """stream_chat을 모아 단일 문자열로 반환한다. 페르소나 프리뷰 등에 사용."""
     tokens: list[str] = []
     async for token in stream_chat(messages, system_prompt=system_prompt, use_think=use_think):
         tokens.append(token)

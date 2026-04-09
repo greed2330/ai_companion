@@ -296,7 +296,7 @@ audio: <wav 파일>
 }
 ```
 
-응답: `audio/wav` 바이너리 스트림
+응답: `audio/mpeg` 바이너리 스트림 (MP3. edge-tts 기반으로 변경됨)
 
 ---
 

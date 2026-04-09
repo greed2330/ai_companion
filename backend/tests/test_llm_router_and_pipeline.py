@@ -53,16 +53,6 @@ def reset_mood():
 
 
 @pytest.fixture(autouse=True)
-def reset_sulky():
-    import backend.services.sulky_service as sulky_mod
-    sulky_mod._sulky = False
-    sulky_mod._since = None
-    yield
-    sulky_mod._sulky = False
-    sulky_mod._since = None
-
-
-@pytest.fixture(autouse=True)
 def reset_session_start():
     import backend.services.chat_pipeline as cp_mod
     cp_mod._session_start.clear()
@@ -228,7 +218,7 @@ async def test_context_memory_in_prompt(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_context_audio_low_energy():
-    """audio_features.energy < 0.4 → 'low energy'가 시스템 프롬프트에 포함된다."""
+    """audio_features.energy < 0.4 → 낮은 에너지 힌트가 시스템 프롬프트에 포함된다."""
     from backend.services.context_builder import build_context
     ctx = await build_context(
         message="안녕",
@@ -237,12 +227,12 @@ async def test_context_audio_low_energy():
         interaction_type="general",
         audio_features={"energy": 0.2},
     )
-    assert "low energy" in ctx["system_prompt"]
+    assert "기운 없음" in ctx["system_prompt"]
 
 
 @pytest.mark.asyncio
 async def test_context_long_session():
-    """session_duration > 120 → 분 수가 프롬프트에 포함된다."""
+    """session_duration >= 60 → 분 수가 프롬프트에 포함된다."""
     from backend.services.context_builder import build_context
     ctx = await build_context(
         message="안녕",
@@ -251,7 +241,7 @@ async def test_context_long_session():
         interaction_type="general",
         session_duration=180,
     )
-    assert "180min" in ctx["system_prompt"]
+    assert "180분" in ctx["system_prompt"]
 
 
 @pytest.mark.asyncio

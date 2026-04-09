@@ -16,7 +16,7 @@ def summarize_session(conversation_id: str) -> dict:
     """세션의 대화를 Ollama로 요약하고 conversations.session_summary에 저장한다."""
     logger.info(f"Celery task start: summarize_session conversation_id={conversation_id}")
     try:
-        result = asyncio.get_event_loop().run_until_complete(_summarize(conversation_id))
+        result = asyncio.run(_summarize(conversation_id))
         logger.info(f"Celery task complete: summarize_session conversation_id={conversation_id}")
         return result
     except Exception as exc:

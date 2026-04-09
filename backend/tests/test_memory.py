@@ -118,10 +118,15 @@ async def test_memory_search_returns_results(use_tmp_db, mock_mem0):
 
     await init_db()
 
-    # mem0가 "Python 개발자" 사실을 추출했다고 가정
+    mem0_id = "test-mem0-id-001"
+    fact_text = "오너는 Python 개발자야"
+
+    # mem0 add: id 포함 (SPEC-02: mem0_id SQLite 연결)
     mock_mem0.add.return_value = {
-        "results": [{"memory": "오너는 Python 개발자야", "event": "ADD"}]
+        "results": [{"id": mem0_id, "memory": fact_text, "event": "ADD"}]
     }
+    # mem0 search: 시맨틱 검색 결과 반환
+    mock_mem0.search.return_value = [{"id": mem0_id, "memory": fact_text}]
 
     facts = await svc_mod.add_memory("owner", "나 Python으로 개발해")
     assert len(facts) == 1

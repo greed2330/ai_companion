@@ -4,13 +4,12 @@ routers/chat.py는 이 모듈에 위임만 한다. 비즈니스 로직 전부 �
 
 흐름:
   1. 안전 필터
-  2. 삐짐 화해 체크
-  3. DB 설정 (conversation 생성, 메시지 저장, 히스토리 로드, 메모리 검색)
-  4. 컨텍스트 빌드
-  5. 스트리밍 (1st call)
-  6. 룸 변경 SSE
-  7. done 이벤트 전송
-  8. 백그라운드: 감정 파싱 + 2nd call + SSE emotion_update push + DB 저장
+  2. DB 설정 (conversation 생성, 메시지 저장, 히스토리 로드, 메모리 검색)
+  3. 컨텍스트 빌드
+  4. 스트리밍 (1st call)
+  5. 룸 변경 SSE
+  6. done 이벤트 전송
+  7. 백그라운드: 감정 파싱 + 2nd call + SSE emotion_update push + DB 저장
 """
 
 import asyncio
@@ -37,7 +36,6 @@ from backend.services.room_service import ROOM_MESSAGES, detect_room_type
 from backend.services.safety_filter import get_block_response, should_block
 from backend.services.session_judge import judge_session_start, save_session_end
 from backend.services.settings_service import get_persona
-from backend.services.sulky_service import check_reconcile, is_sulky
 from backend.services.tts_emotion import get_tts_params
 
 logger = logging.getLogger(__name__)
@@ -48,6 +46,18 @@ _OWNER_USER_ID = "owner"
 _session_start: dict[str, datetime] = {}
 # 대화별 현재 룸 타입
 _conversation_rooms: dict[str, str] = {}
+
+# 인메모리 딕트 최대 항목 수 — 초과 시 오래된 항목부터 제거
+_MAX_TRACKED_CONVERSATIONS = 500
+
+
+def _evict_if_needed() -> None:
+    """_session_start / _conversation_rooms가 한계를 초과하면 절반을 비운다."""
+    if len(_session_start) > _MAX_TRACKED_CONVERSATIONS:
+        oldest = list(_session_start.keys())[: _MAX_TRACKED_CONVERSATIONS // 2]
+        for k in oldest:
+            _session_start.pop(k, None)
+            _conversation_rooms.pop(k, None)
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +241,18 @@ async def _background_process(
         except (ImportError, Exception):
             pass
 
+        # Celery: LLM 자동 채점 (fire-and-forget)
+        try:
+            from backend.tasks.score_tasks import score_message
+            score_message.delay(
+                message_id=assistant_msg_id,
+                user_message=original_message,
+                assistant_response=full_response,
+                interaction_type=interaction_type,
+            )
+        except Exception as score_exc:
+            logger.warning("score_message.delay failed: %s", score_exc)
+
         logger.info(
             "_background_process: cid=%s emotion=%s mood=%s",
             conversation_id, parsed.emotion, new_mood,
@@ -278,15 +300,13 @@ async def run_chat_pipeline(
 
         return StreamingResponse(_blocked_stream(), media_type="text/event-stream")
 
-    # 2. 삐짐 화해 체크 (in-memory, DB 불필요)
-    check_reconcile(message)
-
     cid = conversation_id or str(uuid.uuid4())
     request_time = datetime.now(timezone.utc)
     resolved_owner_emotion = owner_emotion or "NEUTRAL"
 
     # 세션 경과 시간
     if cid not in _session_start:
+        _evict_if_needed()
         _session_start[cid] = datetime.now()
     session_min = int((datetime.now() - _session_start[cid]).total_seconds() / 60)
 
@@ -324,7 +344,7 @@ async def run_chat_pipeline(
                     "room_type": new_room,
                     "message":   ROOM_MESSAGES.get(new_room, ""),
                 }
-                push_event(room_event)
+                # /chat SSE에만 전송 (push_event는 /mood/stream 전용이므로 room_change 제외)
                 yield f"data: {json.dumps(room_event, ensure_ascii=False)}\n\n"
 
             # 히스토리 + 메모리 병렬 조회
@@ -335,12 +355,14 @@ async def run_chat_pipeline(
             for mem in memories:
                 await update_confidence(mem["id"], delta=0.1)
 
-            # 세션 시작 proactive 메시지
+            # 세션 시작 판단 (1회만 호출)
+            session_hint = ""
             if is_first:
                 sc = judge_session_start(
                     first_message=message,
                     audio_energy=audio_features.get("energy") if audio_features else None,
                 )
+                session_hint = sc.system_hint or ""
                 if sc.proactive_msg:
                     push_event({"type": "proactive", "message": sc.proactive_msg})
 
@@ -359,6 +381,7 @@ async def run_chat_pipeline(
                 session_duration=session_min,
                 is_first_message=is_first,
                 memories=memories,
+                session_hint=session_hint,
             )
 
             # 스트리밍 (1st call)

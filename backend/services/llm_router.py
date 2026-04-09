@@ -69,6 +69,19 @@ class LLMRouter:
         except Exception:
             return {}
 
+    async def call_for_text(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+    ) -> str:
+        """단순 텍스트 완성 — 스트리밍 없이 전체 응답 문자열 반환."""
+        if self.source == "protocol":
+            return ""
+        full = ""
+        async for t in self.stream(messages, system_prompt, use_think=False):
+            full += t
+        return full.strip()
+
     async def call_protocol_full(
         self,
         messages: list[dict],
@@ -124,42 +137,63 @@ class LLMRouter:
         system_prompt: str,
         use_think: bool,
     ) -> AsyncGenerator[str, None]:
+        import re
         from backend.services.settings_service import get_current_chat_model
         from backend.services.llm import get_ollama_base_url
 
-        payload = {
+        payload: dict = {
             "model": get_current_chat_model(),
             "messages": [{"role": "system", "content": system_prompt}] + messages,
             "stream": True,
             "keep_alive": -1,
-            "think": use_think,
         }
+        if use_think:
+            payload["think"] = True
+
         logger.info(
             "LLMRouter Ollama stream: model=%s think=%s", payload["model"], use_think
         )
+
+        _think_pat = re.compile(r"<think>.*?</think>", re.DOTALL)
+        allow_think_retry = use_think
+
         async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream(
-                "POST",
-                f"{get_ollama_base_url()}/api/chat",
-                json=payload,
-            ) as resp:
-                if resp.status_code != 200:
-                    logger.error("LLMRouter Ollama error: status=%s", resp.status_code)
-                    raise RuntimeError(f"Ollama 응답 오류: {resp.status_code}")
-                async for line in resp.aiter_lines():
-                    if not line:
+            while True:
+                async with client.stream(
+                    "POST",
+                    f"{get_ollama_base_url()}/api/chat",
+                    json=payload,
+                ) as resp:
+                    if resp.status_code == 400 and allow_think_retry:
+                        logger.warning(
+                            "LLMRouter Ollama 400 with think; retrying without think"
+                        )
+                        payload.pop("think", None)
+                        allow_think_retry = False
                         continue
-                    try:
-                        data = json.loads(line)
-                        msg = data.get("message", {})
-                        if thinking := msg.get("thinking"):
-                            logger.debug("[think] %s", thinking[:100])
-                        if c := msg.get("content", ""):
-                            yield c
-                        if data.get("done"):
-                            break
-                    except json.JSONDecodeError:
-                        continue
+                    if resp.status_code != 200:
+                        logger.error(
+                            "LLMRouter Ollama error: status=%s", resp.status_code
+                        )
+                        raise RuntimeError(f"Ollama 응답 오류: {resp.status_code}")
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                            msg = data.get("message", {})
+                            if thinking := msg.get("thinking"):
+                                logger.debug("[think] %s", thinking[:100])
+                            if c := msg.get("content", ""):
+                                # <think>…</think> 태그가 content에 노출될 경우 제거
+                                c = _think_pat.sub("", c).strip()
+                                if c:
+                                    yield c
+                            if data.get("done"):
+                                return
+                        except json.JSONDecodeError:
+                            continue
+                break
 
     async def _stream_openai(
         self,
