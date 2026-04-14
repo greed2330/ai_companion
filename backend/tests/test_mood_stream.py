@@ -205,7 +205,7 @@ async def test_mood_trigger_from_message(client):
     )
     assert done_chunk is not None
     done_data = json.loads(done_chunk.replace("data: ", "").strip())
-    assert done_data["mood"] == "CONCERNED"
+    assert done_data["mood"] == "PENDING"  # SPEC-05: 최종 무드는 emotion_update SSE에서 전달
 
 
 # ── /mood/stream 헤더 테스트 ─────────────────────────────────

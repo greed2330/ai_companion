@@ -55,6 +55,53 @@ class TTSRouter:
         """등록된 모든 엔진의 메타데이터를 반환한다."""
         return [e.engine_info for e in self._engines.values()]
 
+    async def list_engines_with_availability(self) -> list[dict]:
+        """등록된 엔진 목록과 사용 가능 여부를 반환한다."""
+        result = []
+        for engine in self._engines.values():
+            info = engine.engine_info
+            available = await engine.is_available()
+            result.append({
+                "engine_id":             info.id,
+                "name":                  info.name,
+                "description":           info.description,
+                "requires_internet":     info.requires_internet,
+                "supports_custom_voice": info.supports_custom_voices,
+                "available":             available,
+            })
+        return result
+
+    async def select_engine_and_voice(
+        self,
+        engine_id: str,
+        voice_id: str | None = None,
+    ) -> dict:
+        """엔진(및 목소리)을 변경하고 현재 선택을 반환한다.
+
+        Raises:
+            ValueError: engine_id가 등록되지 않은 경우
+            RuntimeError: 엔진이 사용 불가능한 경우
+            ValueError: voice_id가 해당 엔진에 없는 경우
+        """
+        if engine_id not in self._engines:
+            raise ValueError(f"ENGINE_NOT_FOUND:{engine_id}")
+        engine = self._engines[engine_id]
+        if not await engine.is_available():
+            raise RuntimeError(f"ENGINE_NOT_AVAILABLE:{engine_id}")
+        if voice_id:
+            voices = await engine.list_voices()
+            if not any(v.id == voice_id for v in voices):
+                raise ValueError(f"VOICE_NOT_FOUND:{voice_id}")
+            self._current_voice_id = voice_id
+        else:
+            voices = await engine.list_voices()
+            if voices:
+                self._current_voice_id = voices[0].id
+        self._current_engine_id = engine_id
+        self._persist()
+        logger.info("TTSRouter: selected engine=%s voice=%s", engine_id, self._current_voice_id)
+        return self.get_current()
+
     async def list_voices(self, engine_id: str | None = None) -> list[VoiceInfo]:
         """지정 엔진(또는 현재 엔진)의 목소리 목록을 반환한다."""
         engine = self._get_engine(engine_id)

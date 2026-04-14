@@ -109,12 +109,6 @@ def test_think_false_short_message():
     assert should_use_think("뭐해?") is False
 
 
-def test_think_true_coding_type():
-    """interaction_type='coding'이면 항상 True."""
-    from backend.services.llm import should_use_think
-    assert should_use_think("안녕", interaction_type="coding") is True
-
-
 def test_think_false_chat_type():
     """interaction_type='chat'이면 항상 False."""
     from backend.services.llm import should_use_think
@@ -125,12 +119,6 @@ def test_think_true_complex_keyword():
     """복잡한 키워드 포함 → True."""
     from backend.services.llm import should_use_think
     assert should_use_think("이 코드 왜 에러 나는 거야?") is True
-
-
-def test_think_true_coding_keyword():
-    """'코딩' 키워드 → True."""
-    from backend.services.llm import should_use_think
-    assert should_use_think("코딩 도와줘, 이 함수가 계속 틀려") is True
 
 
 # ── postprocess_for_voice ───────────────────────────────────────
@@ -172,10 +160,10 @@ def test_voice_short_text_unchanged():
 # ── room_service ────────────────────────────────────────────────
 
 
-def test_room_coding():
-    """'코드 버그' 메시지 → 'coding'."""
+def test_room_code_is_general():
+    """코드 관련 메시지 → 'general' (coding 룸 제거됨)."""
     from backend.services.room_service import detect_room_type
-    assert detect_room_type("이 코드 버그 있어") == "coding"
+    assert detect_room_type("이 코드 버그 있어") == "general"
 
 
 def test_room_game():
@@ -191,9 +179,9 @@ def test_room_general():
 
 
 def test_room_autonomous_context():
-    """autonomous_context에 '코딩' 포함 → 'coding'."""
+    """autonomous_context에 '게임' 포함 → 'game'."""
     from backend.services.room_service import detect_room_type
-    assert detect_room_type("안녕", autonomous_context="코딩 중") == "coding"
+    assert detect_room_type("안녕", autonomous_context="게임 중") == "game"
 
 
 # ── build_system_prompt ─────────────────────────────────────────
@@ -315,17 +303,17 @@ async def test_chat_room_change_event(client):
     with patch.object(cp_mod, "llm_router", mock_router):
         await client.post("/chat", json={"message": "안녕"})
 
-    # 두 번째 요청 (coding으로 변경)
+    # 두 번째 요청 (game으로 변경)
     with patch.object(cp_mod, "llm_router", mock_router):
         resp = await client.post(
             "/chat",
-            json={"message": "이 코드 버그 있어"},
+            json={"message": "게임하자"},
         )
 
     events = parse_sse(resp.text)
     room_events = [e for e in events if e.get("type") == "room_change"]
     assert len(room_events) == 1
-    assert room_events[0]["room_type"] == "coding"
+    assert room_events[0]["room_type"] == "game"
 
 
 # ── /settings/persona 엔드포인트 ────────────────────────────────

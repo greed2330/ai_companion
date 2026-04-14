@@ -9,7 +9,7 @@ routers/chat.py는 이 모듈에 위임만 한다. 비즈니스 로직 전부 �
   4. 스트리밍 (1st call)
   5. 룸 변경 SSE
   6. done 이벤트 전송
-  7. 백그라운드: 감정 파싱 + 2nd call + SSE emotion_update push + DB 저장
+  7. 백그라운드: 감정 파싱 + motion_lookup + SSE emotion_update push + DB 저장
 """
 
 import asyncio
@@ -26,11 +26,11 @@ from fastapi.responses import StreamingResponse
 
 from backend.models.schema import DB_PATH
 from backend.services.context_builder import build_context
-from backend.services.internal_prompt_builder import build_internal_state_prompt
 from backend.services.llm import postprocess_for_voice
+from backend.services.motion_lookup import get_motion_data
 from backend.services.llm_router import llm_router
 from backend.services.memory import search_memory, update_confidence
-from backend.services.mood import detect_mood_from_text, get_mood, push_event, set_mood
+from backend.services.mood import get_mood, get_effective_mood, push_event, set_mood, push_tier3, tick_tier3
 from backend.services.response_parser import parse_response
 from backend.services.room_service import ROOM_MESSAGES, detect_room_type
 from backend.services.safety_filter import get_block_response, should_block
@@ -120,6 +120,16 @@ async def _load_recent_messages(
     return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
 
 
+async def _update_message_mood(message_id: str, mood: str) -> None:
+    """백그라운드 감정 파싱 완료 후 messages.mood_at_response를 업데이트한다."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE messages SET mood_at_response = ? WHERE id = ?",
+            (mood, message_id),
+        )
+        await db.commit()
+
+
 async def _save_message(
     db: aiosqlite.Connection,
     message_id: str,
@@ -161,6 +171,38 @@ async def _save_message(
 # ---------------------------------------------------------------------------
 
 
+def _compute_finetune_tags(
+    parsed_emotion: str,
+    tier2_mood_at_start: str,
+    memories_used: list[dict],
+    warmth: float,
+) -> list[str]:
+    """파인튜닝 태그 계산. 하나다운 순간 감지."""
+    tags: list[str] = []
+    if warmth > 0.5 and parsed_emotion != tier2_mood_at_start:
+        tags.append("character_authentic")
+    if any(m.get("emotional_weight", 0) > 0.7 for m in memories_used):
+        tags.append("emotional_genuine")
+    if memories_used:
+        tags.append("relationship_memory")
+    return tags
+
+
+async def _save_finetune_tags(message_id: str, tags: list[str]) -> None:
+    if not tags:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO feedback (message_id, finetune_tags)
+            VALUES (?, ?)
+            ON CONFLICT(message_id) DO UPDATE SET finetune_tags = excluded.finetune_tags
+            """,
+            (message_id, json.dumps(tags, ensure_ascii=False)),
+        )
+        await db.commit()
+
+
 async def _background_process(
     full_response: str,
     original_message: str,
@@ -173,8 +215,9 @@ async def _background_process(
     timestamp: str,
     session_duration: int,
     ctx: dict,
+    memories: Optional[list[dict]] = None,
 ) -> None:
-    """스트리밍 완료 후 감정 파싱 / 2nd call / SSE push / DB 저장."""
+    """스트리밍 완료 후 감정 파싱 / motion_lookup / SSE push / DB 저장."""
     if not full_response:
         return
 
@@ -188,39 +231,41 @@ async def _background_process(
         # TTS 파라미터
         tts = get_tts_params(parsed.emotion, parsed.intensity)
 
-        # 무드 업데이트
+        # 무드 업데이트 (백그라운드 단일 경로)
         from backend.models.emotion import EMOTION_TO_MOOD
         new_mood = EMOTION_TO_MOOD.get(parsed.emotion, "IDLE")
+        tier2_mood_at_start = get_effective_mood()  # 변경 전 캡처
         set_mood(new_mood)
+        tick_tier3()  # tier3 TTL 카운트다운
+        await _update_message_mood(assistant_msg_id, new_mood)
 
-        # 2nd call: 내부 상태 JSON
-        internal_prompt = build_internal_state_prompt(
-            original_message=original_message,
-            full_response=full_response,
-            parsed_emotion=parsed.emotion,
-            audio_features=audio_features,
-            timestamp=timestamp,
-            session_duration=session_duration,
-        )
-        internal = await llm_router.call_for_json(
-            messages=[{"role": "user", "content": internal_prompt}],
-            system_prompt=(
-                "You are HANA's internal monologue generator. Reply with JSON only."
-            ),
-        )
+        # 모션/텐션 — 룩업 테이블 (2nd LLM call 대체)
+        motion_data = get_motion_data(parsed.emotion, parsed.intensity)
 
         # SSE: emotion_update
         push_event({
             "type":             "emotion_update",
             "emotion":          parsed.emotion,
             "mood":             new_mood,
-            "motion_sequence":  internal.get("motion_sequence", []),
-            "tension_level":    internal.get("tension_level", 1.0),
+            "motion_sequence":  motion_data["motion_sequence"],
+            "tension_level":    motion_data["tension_level"],
             "tts_speed":        tts["speed"],
             "tts_pitch":        tts["pitch"],
             "tts_energy":       tts["energy"],
             "tts_hint":         tts["hint"],
         })
+
+        # SPEC-06: warmth + finetune tags
+        try:
+            from backend.services import hana_state_service
+            state = await hana_state_service.get_state()
+            warmth = float(state.get("relationship_warmth", 0.0))
+            tags = _compute_finetune_tags(
+                parsed.emotion, tier2_mood_at_start, memories or [], warmth
+            )
+            await _save_finetune_tags(assistant_msg_id, tags)
+        except Exception as e:
+            logger.warning("finetune_tags 계산 실패: %s", e)
 
         # 세션 종료 상태 저장
         save_session_end(parsed.emotion, parsed.topic)
@@ -231,7 +276,7 @@ async def _background_process(
             await collect_experience_background(
                 full_response=full_response,
                 parsed=parsed,
-                internal_json=internal,
+                internal_json=motion_data,
                 audio_features=audio_features,
                 owner_emotion=owner_emotion,
                 timestamp=timestamp,
@@ -325,6 +370,23 @@ async def run_chat_pipeline(
                 if last_time
                 else None
             )
+            # SPEC-06: 전체 대화 기준 마지막 어시스턴트 응답으로부터 경과 시간
+            gap_hours: Optional[float] = None
+            if is_first or not last_time:
+                async with db.execute(
+                    "SELECT created_at FROM messages WHERE role='assistant' "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ) as _c:
+                    _row = await _c.fetchone()
+                if _row:
+                    try:
+                        _ts = _row[0]
+                        _last = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
+                        gap_hours = (request_time - _last).total_seconds() / 3600
+                    except Exception:
+                        pass
+            elif last_time:
+                gap_hours = (request_time - last_time).total_seconds() / 3600
 
             user_msg_id = str(uuid.uuid4())
             await _save_message(
@@ -382,6 +444,7 @@ async def run_chat_pipeline(
                 is_first_message=is_first,
                 memories=memories,
                 session_hint=session_hint,
+                gap_hours=gap_hours,
             )
 
             # 스트리밍 (1st call)
@@ -413,27 +476,24 @@ async def run_chat_pipeline(
                 full_text = postprocess_for_voice(full_text)
                 yield f"data: {json.dumps({'type': 'token', 'content': full_text}, ensure_ascii=False)}\n\n"
 
-            # 무드 감지 및 업데이트
-            detected_mood = detect_mood_from_text(full_text)
-            set_mood(detected_mood)
-
-            # 어시스턴트 메시지 저장
+            # 어시스턴트 메시지 저장 (mood는 백그라운드에서 확정 후 UPDATE)
             await _save_message(
                 db,
                 assistant_msg_id,
                 cid,
                 "assistant",
                 full_text,
-                mood=detected_mood,
+                mood=None,
                 response_time_ms=elapsed_ms,
                 interaction_type=interaction_type,
             )
 
+            # "PENDING": 백그라운드가 emotion_update SSE로 최종 무드 전달
             done_event = {
                 "type":            "done",
                 "message_id":      assistant_msg_id,
                 "conversation_id": cid,
-                "mood":            detected_mood,
+                "mood":            "PENDING",
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
@@ -457,6 +517,7 @@ async def run_chat_pipeline(
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 session_duration=session_min,
                 ctx=ctx,
+                memories=memories,
             )
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

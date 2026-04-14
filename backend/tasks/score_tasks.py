@@ -94,12 +94,17 @@ async def _score_async(
 ) -> dict:
     from backend.services.llm_router import llm_router
 
-    # 1. Worker LLM에 채점 요청
+    # API 모드 감지 시 자동 채점 skip (비용 절감)
+    if llm_router.source in ("openai", "anthropic"):
+        logger.info("API 모드 감지: 자동 채점 skip message_id=%s", message_id)
+        return {"message_id": message_id, "auto_score": None, "final_score": None, "saved_to_dataset": False}
+
+    # 1. Worker LLM(qwen3:4b)에 채점 요청
     prompt = _SCORING_PROMPT.format(
         user_message=user_message[:500],
         assistant_response=assistant_response[:800],
     )
-    raw = await llm_router.call_for_text(
+    raw = await llm_router.call_for_text_worker(
         messages=[{"role": "user", "content": prompt}],
         system_prompt="You are a response quality evaluator. Reply with JSON only.",
     )

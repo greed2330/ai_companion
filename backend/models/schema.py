@@ -114,6 +114,22 @@ CREATE TABLE IF NOT EXISTS proactive_log (
 );
 """
 
+# SPEC-06: 하나 상태 싱글턴 (Tier 1 무드 + relationship_warmth 영속화)
+CREATE_HANA_STATE = """
+CREATE TABLE IF NOT EXISTS hana_state (
+    id                    TEXT PRIMARY KEY DEFAULT 'singleton',
+    tier1_mood            TEXT NOT NULL DEFAULT 'IDLE',
+    tier1_intensity       REAL NOT NULL DEFAULT 0.5,
+    tier1_updated_at      TIMESTAMP,
+    relationship_warmth   REAL NOT NULL DEFAULT 0.0,
+    warmth_updated_at     TIMESTAMP,
+    first_conversation_at TIMESTAMP,
+    total_session_count   INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+CREATE_HANA_STATE_SEED = "INSERT OR IGNORE INTO hana_state (id) VALUES ('singleton');"
+
 ALL_TABLES = [
     CREATE_CONVERSATIONS,
     CREATE_MESSAGES,
@@ -124,6 +140,8 @@ ALL_TABLES = [
     CREATE_MINECRAFT_ACTIONS,
     CREATE_VOICE_LOGS,
     CREATE_PROACTIVE_LOG,
+    CREATE_HANA_STATE,
+    CREATE_HANA_STATE_SEED,
 ]
 
 # Phase 2 신규 컬럼 — 기존 DB 마이그레이션용
@@ -138,6 +156,16 @@ _MESSAGES_NEW_COLUMNS = [
 # SPEC-02: memory_facts.mem0_id 마이그레이션
 _MEMORY_FACTS_NEW_COLUMNS = [
     ("mem0_id", "TEXT"),
+]
+
+# SPEC-06 마이그레이션
+_MEMORY_FACTS_SPEC06_COLUMNS = [
+    ("memory_type",      "TEXT DEFAULT 'semantic'"),
+    ("emotional_weight", "REAL DEFAULT 0.5"),
+]
+
+_FEEDBACK_SPEC06_COLUMNS = [
+    ("finetune_tags", "TEXT"),
 ]
 
 
@@ -165,6 +193,20 @@ async def _migrate(db: aiosqlite.Connection) -> None:
     for col, typedef in _MEMORY_FACTS_NEW_COLUMNS:
         try:
             await db.execute(f"ALTER TABLE memory_facts ADD COLUMN {col} {typedef}")
+            await db.commit()
+        except aiosqlite.OperationalError:
+            pass
+
+    for col, typedef in _MEMORY_FACTS_SPEC06_COLUMNS:
+        try:
+            await db.execute(f"ALTER TABLE memory_facts ADD COLUMN {col} {typedef}")
+            await db.commit()
+        except aiosqlite.OperationalError:
+            pass
+
+    for col, typedef in _FEEDBACK_SPEC06_COLUMNS:
+        try:
+            await db.execute(f"ALTER TABLE feedback ADD COLUMN {col} {typedef}")
             await db.commit()
         except aiosqlite.OperationalError:
             pass

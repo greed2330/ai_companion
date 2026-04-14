@@ -82,6 +82,41 @@ class LLMRouter:
             full += t
         return full.strip()
 
+    async def call_for_text_worker(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+    ) -> str:
+        """백그라운드 경량 작업용. OLLAMA_WORKER_MODEL(기본: qwen3:4b)을 사용한다.
+
+        ollama 소스가 아닌 경우(openai 등) call_for_text()에 위임한다.
+        """
+        if self.source != "ollama":
+            return await self.call_for_text(messages, system_prompt)
+
+        import os
+        from backend.services.llm import get_ollama_base_url
+
+        worker_model = os.getenv("OLLAMA_WORKER_MODEL", "qwen3:4b")
+        payload = {
+            "model":    worker_model,
+            "messages": [{"role": "system", "content": system_prompt}] + messages,
+            "stream":   False,
+            "keep_alive": -1,
+            "options":  {"num_predict": 512},
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    f"{get_ollama_base_url()}/api/chat", json=payload
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("message", {}).get("content", "").strip()
+        except Exception as exc:
+            logger.warning("call_for_text_worker failed, falling back: %s", exc)
+            return await self.call_for_text(messages, system_prompt)
+
     async def call_protocol_full(
         self,
         messages: list[dict],

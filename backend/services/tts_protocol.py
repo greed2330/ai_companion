@@ -49,6 +49,10 @@ class TTSEngine(Protocol):
         """엔진 메타데이터를 반환한다."""
         ...
 
+    async def is_available(self) -> bool:
+        """엔진이 현재 사용 가능한지 확인한다."""
+        ...
+
     async def list_voices(self) -> list[VoiceInfo]:
         """사용 가능한 목소리 목록을 반환한다."""
         ...

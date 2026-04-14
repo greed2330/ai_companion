@@ -89,7 +89,7 @@ async def test_chat_happy_path(client):
     assert len(done_events) == 1
     assert "conversation_id" in done_events[0]
     assert "message_id" in done_events[0]
-    assert done_events[0]["mood"] == "IDLE"
+    assert done_events[0]["mood"] == "PENDING"  # SPEC-05: 백그라운드 완료 전 PENDING
 
 
 # ---------------------------------------------------------------------------
