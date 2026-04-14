@@ -30,7 +30,7 @@ from backend.services.llm import postprocess_for_voice
 from backend.services.motion_lookup import get_motion_data
 from backend.services.llm_router import llm_router
 from backend.services.memory import search_memory, update_confidence
-from backend.services.mood import get_mood, push_event, set_mood
+from backend.services.mood import get_mood, get_effective_mood, push_event, set_mood, push_tier3, tick_tier3
 from backend.services.response_parser import parse_response
 from backend.services.room_service import ROOM_MESSAGES, detect_room_type
 from backend.services.safety_filter import get_block_response, should_block
@@ -171,6 +171,38 @@ async def _save_message(
 # ---------------------------------------------------------------------------
 
 
+def _compute_finetune_tags(
+    parsed_emotion: str,
+    tier2_mood_at_start: str,
+    memories_used: list[dict],
+    warmth: float,
+) -> list[str]:
+    """파인튜닝 태그 계산. 하나다운 순간 감지."""
+    tags: list[str] = []
+    if warmth > 0.5 and parsed_emotion != tier2_mood_at_start:
+        tags.append("character_authentic")
+    if any(m.get("emotional_weight", 0) > 0.7 for m in memories_used):
+        tags.append("emotional_genuine")
+    if memories_used:
+        tags.append("relationship_memory")
+    return tags
+
+
+async def _save_finetune_tags(message_id: str, tags: list[str]) -> None:
+    if not tags:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO feedback (message_id, finetune_tags)
+            VALUES (?, ?)
+            ON CONFLICT(message_id) DO UPDATE SET finetune_tags = excluded.finetune_tags
+            """,
+            (message_id, json.dumps(tags, ensure_ascii=False)),
+        )
+        await db.commit()
+
+
 async def _background_process(
     full_response: str,
     original_message: str,
@@ -183,6 +215,7 @@ async def _background_process(
     timestamp: str,
     session_duration: int,
     ctx: dict,
+    memories: Optional[list[dict]] = None,
 ) -> None:
     """스트리밍 완료 후 감정 파싱 / motion_lookup / SSE push / DB 저장."""
     if not full_response:
@@ -201,7 +234,9 @@ async def _background_process(
         # 무드 업데이트 (백그라운드 단일 경로)
         from backend.models.emotion import EMOTION_TO_MOOD
         new_mood = EMOTION_TO_MOOD.get(parsed.emotion, "IDLE")
+        tier2_mood_at_start = get_effective_mood()  # 변경 전 캡처
         set_mood(new_mood)
+        tick_tier3()  # tier3 TTL 카운트다운
         await _update_message_mood(assistant_msg_id, new_mood)
 
         # 모션/텐션 — 룩업 테이블 (2nd LLM call 대체)
@@ -219,6 +254,18 @@ async def _background_process(
             "tts_energy":       tts["energy"],
             "tts_hint":         tts["hint"],
         })
+
+        # SPEC-06: warmth + finetune tags
+        try:
+            from backend.services import hana_state_service
+            state = await hana_state_service.get_state()
+            warmth = float(state.get("relationship_warmth", 0.0))
+            tags = _compute_finetune_tags(
+                parsed.emotion, tier2_mood_at_start, memories or [], warmth
+            )
+            await _save_finetune_tags(assistant_msg_id, tags)
+        except Exception as e:
+            logger.warning("finetune_tags 계산 실패: %s", e)
 
         # 세션 종료 상태 저장
         save_session_end(parsed.emotion, parsed.topic)
@@ -323,6 +370,23 @@ async def run_chat_pipeline(
                 if last_time
                 else None
             )
+            # SPEC-06: 전체 대화 기준 마지막 어시스턴트 응답으로부터 경과 시간
+            gap_hours: Optional[float] = None
+            if is_first or not last_time:
+                async with db.execute(
+                    "SELECT created_at FROM messages WHERE role='assistant' "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ) as _c:
+                    _row = await _c.fetchone()
+                if _row:
+                    try:
+                        _ts = _row[0]
+                        _last = datetime.fromisoformat(_ts.replace("Z", "+00:00"))
+                        gap_hours = (request_time - _last).total_seconds() / 3600
+                    except Exception:
+                        pass
+            elif last_time:
+                gap_hours = (request_time - last_time).total_seconds() / 3600
 
             user_msg_id = str(uuid.uuid4())
             await _save_message(
@@ -380,6 +444,7 @@ async def run_chat_pipeline(
                 is_first_message=is_first,
                 memories=memories,
                 session_hint=session_hint,
+                gap_hours=gap_hours,
             )
 
             # 스트리밍 (1st call)
@@ -452,6 +517,7 @@ async def run_chat_pipeline(
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 session_duration=session_min,
                 ctx=ctx,
+                memories=memories,
             )
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

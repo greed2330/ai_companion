@@ -53,6 +53,13 @@ async def lifespan(app: FastAPI):
         logger.info("TTS router initialized")
     except Exception as e:
         logger.warning("TTS router init failed: %s", e)
+    # SPEC-06: Tier1 무드 DB에서 복원
+    try:
+        from backend.services.mood import load_tier1_from_db
+        await load_tier1_from_db()
+        logger.info("Tier1 mood restored from DB")
+    except Exception as e:
+        logger.warning("Tier1 mood restore failed: %s", e)
     # ChromaDB 레거시 컬렉션 마이그레이션 (기존 hana_memory → hana_memory_longterm)
     try:
         from backend.services.memory_service import migrate_legacy_collection

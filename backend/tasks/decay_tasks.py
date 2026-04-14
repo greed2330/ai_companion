@@ -35,17 +35,25 @@ async def _run_decay() -> dict:
     from backend.models.schema import DB_PATH
 
     async with aiosqlite.connect(DB_PATH) as db:
+        # SPEC-06: emotional_weight 반영 decay
+        # weight=0 → 0.97배/주, weight=1.0 → 0.99배/주 (중요한 기억은 더 오래 유지)
         cursor = await db.execute(
-            """
+            f"""
             UPDATE memory_facts
-            SET confidence = confidence * ?
-            WHERE last_referenced < datetime('now', ?)
-              AND confidence > ?
+            SET confidence = confidence * (0.97 + 0.02 * COALESCE(emotional_weight, 0.5))
+            WHERE last_referenced < datetime('now', '-{_INACTIVITY_DAYS} days')
+              AND confidence > {_MIN_CONFIDENCE}
             """,
-            (_DECAY_FACTOR, f"-{_INACTIVITY_DAYS} days", _MIN_CONFIDENCE),
         )
         await db.commit()
         sqlite_updated = cursor.rowcount
+
+    # SPEC-06: warmth decay
+    try:
+        from backend.services.warmth_service import decay_warmth_if_idle
+        await decay_warmth_if_idle()
+    except Exception as e:
+        logger.warning("warmth decay skipped: %s", e)
 
     # ChromaDB longterm 컬렉션에도 decay 적용
     chroma_updated = 0

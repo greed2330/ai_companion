@@ -17,6 +17,35 @@ logger = logging.getLogger(__name__)
 _OWNER_USER_ID = "owner"
 
 
+def _build_gap_hint(gap_hours: Optional[float]) -> str:
+    """마지막 대화로부터 경과 시간 → 재회 힌트."""
+    if gap_hours is None or gap_hours < 8:
+        return ""
+    if gap_hours < 24:
+        return "오늘 처음 만남. 반갑게 재개하는 느낌."
+    if gap_hours < 72:
+        return f"마지막 대화로부터 {int(gap_hours)}시간 지남. 짧게 안부 확인 자연스러움."
+    if gap_hours < 168:
+        return f"마지막 대화로부터 {int(gap_hours // 24)}일 지남. 공백 느껴짐."
+    days = int(gap_hours // 24)
+    return f"마지막 대화로부터 {days}일 지남. 관계 온도 소폭 하락. 다시 데우는 과정 자연스러움."
+
+
+def _build_time_hint() -> str:
+    """현재 시각 기준 하루 리듬 힌트."""
+    from datetime import datetime
+    hour = datetime.now().hour
+    if 6 <= hour < 11:
+        return "오전. 에너지 있는 시작."
+    if 18 <= hour < 23:
+        return "저녁. 편안한 분위기."
+    if 23 <= hour or hour < 2:
+        return "자정. 걱정 모드 슬금슬금."
+    if 2 <= hour < 6:
+        return "새벽. SLEEPY + 걱정. 자라고 한 번쯤은 말해야 함."
+    return ""
+
+
 async def build_context(
     message: str,
     mood: str,
@@ -30,6 +59,7 @@ async def build_context(
     is_first_message: bool = False,
     memories: Optional[list[dict]] = None,
     session_hint: str = "",
+    gap_hours: Optional[float] = None,
 ) -> dict:
     """
     LLM 호출에 필요한 컨텍스트를 구성한다.
@@ -80,6 +110,21 @@ async def build_context(
     except Exception as e:
         logger.error("philosophy_service 호출 실패: %s", e)
 
+    # SPEC-06: warmth + identity 주입
+    warmth_hint = ""
+    identity_block = ""
+    try:
+        from backend.services.hana_state_service import get_state
+        from backend.services.warmth_service import get_warmth_hint
+        from backend.services.identity_service import load_identity, build_identity_prompt
+        state = await get_state()
+        warmth = float(state.get("relationship_warmth", 0.0))
+        warmth_hint = get_warmth_hint(warmth)
+        identity = load_identity()
+        identity_block = build_identity_prompt(identity, warmth)
+    except Exception as e:
+        logger.error("SPEC-06 warmth/identity 주입 실패: %s", e)
+
     system_prompt = build_system_prompt(
         mood=mood,
         persona=persona,
@@ -90,8 +135,24 @@ async def build_context(
         philosophy=philosophy,
     )
 
+    # warmth + identity 프롬프트 앞에 prepend
+    prefix_blocks: list[str] = []
+    if identity_block:
+        prefix_blocks.append(identity_block)
+    if warmth_hint:
+        prefix_blocks.append(f"## 관계 온도\n{warmth_hint}")
+    if prefix_blocks:
+        system_prompt = "\n\n".join(prefix_blocks) + "\n\n" + system_prompt
+
     # 상황 컨텍스트 주입 (rule-based, AI 호출 없음)
     situation: list[str] = []
+    # SPEC-06: gap + time hints
+    gap_hint = _build_gap_hint(gap_hours)
+    if gap_hint:
+        situation.append(gap_hint)
+    time_hint = _build_time_hint()
+    if time_hint:
+        situation.append(time_hint)
     if audio_features:
         e = audio_features.get("energy", 1.0)
         if e < 0.4:
