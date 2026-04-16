@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import MainWindow from "../pages/MainWindow";
 
 jest.mock("../hooks/useMoodStream", () => jest.fn());
+jest.mock("../hooks/useMotionStream", () => ({ useMotionStream: jest.fn() }));
 jest.mock("../hooks/useConversations", () => jest.fn());
 jest.mock("../hooks/useChat", () => jest.fn());
 jest.mock("../hooks/useSettings", () =>
@@ -136,5 +137,11 @@ describe("MainWindow", () => {
     });
 
     expect(screen.getByText("코딩")).toBeInTheDocument();
+  });
+
+  test("mounts useMotionStream for motion sync", () => {
+    const { useMotionStream } = jest.requireMock("../hooks/useMotionStream");
+    render(<MainWindow />);
+    expect(useMotionStream).toHaveBeenCalled();
   });
 });

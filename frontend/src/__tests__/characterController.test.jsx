@@ -63,7 +63,7 @@ describe("CharacterController", () => {
     ).toHaveBeenLastCalledWith("ParamAngleX", 30);
   });
 
-  test("plays motion sequence", async () => {
+  test("plays motion sequence with step objects", async () => {
     const controller = new CharacterController();
     const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
     await controller.init(createLive2dRenderer(), "hana");
@@ -73,6 +73,43 @@ describe("CharacterController", () => {
     ]);
 
     expect(tweenSpy).toHaveBeenCalledWith("head_x", 15, 300, "ease_out");
+  });
+
+  test("expands string motion names via MOTION_PRESETS", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    // "bounce" → [{abstract:"head_y",...},{abstract:"body_y",...}]
+    await controller.playMotionSequence(["bounce"], 1);
+
+    expect(tweenSpy).toHaveBeenCalledWith("head_y", expect.any(Number), 200, "ease_out");
+  });
+
+  test("ignores unknown string motion names without error", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    await expect(
+      controller.playMotionSequence(["nonexistent_motion"])
+    ).resolves.toBeUndefined();
+    expect(tweenSpy).not.toHaveBeenCalled();
+  });
+
+  test("handles mixed string and object steps", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    await controller.playMotionSequence([
+      "nod",
+      { abstract: "smile", value: 0.5, duration: 200 }
+    ]);
+
+    // "nod" expands to head_y step; "smile" is a direct step
+    expect(tweenSpy).toHaveBeenCalledWith("head_y", expect.any(Number), 300, "ease_in_out");
+    expect(tweenSpy).toHaveBeenCalledWith("smile", 0.5, 200, "ease_out");
   });
 
   test("applies tension level to motion sequence", async () => {

@@ -1,5 +1,69 @@
 import { buildApiUrl } from "./api";
 
+// 고수준 모션 이름 → Live2D 추상 파라미터 step 배열
+// 백엔드 motion_lookup.py의 EMOTION_MOTION_MAP과 이름이 대응됨
+const MOTION_PRESETS = {
+  // HAPPY
+  bounce: [
+    { abstract: "head_y", value: -15, duration: 200, easing: "ease_out", return_to_default: true },
+    { abstract: "body_y", value: -0.07, duration: 200, easing: "ease_out", return_to_default: true },
+  ],
+  wave: [
+    { abstract: "head_z", value: 20, duration: 300, easing: "ease_in_out", return_to_default: true },
+    { abstract: "smile",  value: 0.7, duration: 300, easing: "ease_in_out", return_to_default: true },
+  ],
+  // CONCERNED
+  lean_forward: [
+    { abstract: "head_y", value: 10,   duration: 400, easing: "ease_in_out", return_to_default: true },
+    { abstract: "brow_l", value: -0.5, duration: 400, easing: "ease_in_out", return_to_default: true },
+    { abstract: "brow_r", value: -0.5, duration: 400, easing: "ease_in_out", return_to_default: true },
+  ],
+  tilt_head: [
+    { abstract: "head_z", value: -20, duration: 350, easing: "ease_in_out", return_to_default: true },
+  ],
+  // EXCITED
+  jump: [
+    { abstract: "head_y", value: -18, duration: 150, easing: "ease_out", return_to_default: true },
+    { abstract: "smile",  value: 1.0, duration: 150, easing: "ease_out", return_to_default: true },
+  ],
+  spin: [
+    { abstract: "head_z", value: 25,  duration: 250, easing: "ease_in_out", return_to_default: true },
+    { abstract: "smile",  value: 0.8, duration: 250, easing: "ease_in_out", return_to_default: true },
+  ],
+  // CURIOUS
+  look_around: [
+    { abstract: "gaze_x", value: 0.8, duration: 400, easing: "ease_in_out", return_to_default: true },
+    { abstract: "head_x", value: 10,  duration: 400, easing: "ease_in_out", return_to_default: true },
+  ],
+  // AFFECTIONATE
+  nod: [
+    { abstract: "head_y", value: 15, duration: 300, easing: "ease_in_out", repeat: 2, return_to_default: true },
+  ],
+  smile: [
+    { abstract: "smile",    value: 1.0, duration: 500, easing: "ease_in_out", return_to_default: true },
+    { abstract: "eye_open", value: 0.9, duration: 500, easing: "ease_in_out", return_to_default: true },
+  ],
+  // GAMING
+  cheer: [
+    { abstract: "head_y", value: -15, duration: 200, easing: "ease_out", return_to_default: true },
+    { abstract: "smile",  value: 1.0, duration: 200, easing: "ease_out", return_to_default: true },
+    { abstract: "brow_l", value: 0.7, duration: 200, easing: "ease_out", return_to_default: true },
+    { abstract: "brow_r", value: 0.7, duration: 200, easing: "ease_out", return_to_default: true },
+  ],
+  // SLEEPY
+  slow_sway: [
+    { abstract: "head_z", value: 10, duration: 800, easing: "ease_in_out", return_to_default: true },
+  ],
+  yawn: [
+    { abstract: "mouth_open", value: 0.9, duration: 800, easing: "ease_in_out", return_to_default: true },
+    { abstract: "eye_open",   value: 0.3, duration: 800, easing: "ease_in_out", return_to_default: true, delay: 200 },
+  ],
+  // IDLE
+  idle_sway: [
+    { abstract: "head_z", value: 8, duration: 700, easing: "ease_in_out", return_to_default: true },
+  ],
+};
+
 function clamp(value, range = {}) {
   const min = range.min ?? value;
   const max = range.max ?? value;
@@ -144,8 +208,20 @@ export class CharacterController {
       return;
     }
 
+    // 문자열 모션 이름을 MOTION_PRESETS의 step 배열로 확장
+    const expanded = sequence.flatMap((step) => {
+      if (typeof step === "string") {
+        return MOTION_PRESETS[step] ?? [];
+      }
+      return [step];
+    });
+
+    if (!expanded.length) {
+      return;
+    }
+
     await Promise.all(
-      sequence.map(async (step) => {
+      expanded.map(async (step) => {
         const actual = this.abstractMapping[step.abstract];
         if (!actual) {
           return;
