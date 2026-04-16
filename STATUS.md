@@ -33,8 +33,9 @@ Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 
 ---
 
-### [SPEC-01] 페르소나/시스템 프롬프트 정비
-> `speech_preset`, `personality_preset`이 settings에 저장은 되나 LLM 프롬프트에 전혀 반영 안 됨 (dead code). 기본 프롬프트가 추상적이라 14B 모델이 말투 지시를 일관되게 따르지 못함.
+### [SPEC-01] 페르소나/시스템 프롬프트 정비 ✅ 완료
+> 커밋: `feat: SPEC-01 페르소나 프롬프트 정비`
+> `SPEECH_PRESET_PROMPTS`, `PERSONALITY_PRESET_PROMPTS` 딕셔너리 추가 + `build_system_prompt()` 연결 완료.
 
 #### 문제
 1. `build_system_prompt()`가 `persona` 딕트에서 `speech_style`, `personality` 자유 텍스트만 읽음. UI에서 선택한 `speech_preset`, `personality_preset`은 완전히 무시됨.
@@ -213,8 +214,9 @@ MOOD_PROMPTS: dict[str, str] = {
 
 ---
 
-### [SPEC-02] 메모리 검색 구조 단일화
-> `add_memory`는 mem0→ChromaDB 임베딩 저장, `search_memory`는 SQLite LIKE 텍스트 검색. 임베딩이 검색에서 전혀 사용 안 됨. "안녕" 입력 시 관련 기억 0개 반환이 정상 동작.
+### [SPEC-02] 메모리 검색 구조 단일화 ✅ 완료
+> 커밋: `feat: SPEC-02 메모리 검색 구조 단일화 (mem0 시맨틱 검색)`
+> `memory_facts`에 `mem0_id` 컬럼 추가, `search_memory()` → mem0.search() 시맨틱 검색으로 교체, 양방향 동기화(`delete_memory_fact`) 구현 완료.
 
 #### 문제
 1. `add_memory`: mem0.add() → ChromaDB 임베딩 저장 + SQLite memory_facts 텍스트 저장 (이중 저장)
@@ -365,7 +367,7 @@ async def delete_memory_fact(fact_id: str) -> None:
 
 ```
 현재 작업 브랜치: dev
-마지막 완료: 2026-04-14 유지보수 명세서 일괄 구현 세션
+마지막 완료: 2026-04-16 STATUS.md 동기화 — SPEC-01/02/think블록 실제 완료 확인
 블로커: 없음
 ⚠️ 오너 지시 (2026-03-26): Claude Code가 frontend/ 도 담당. Codex 역할 없음.
 ```
@@ -417,52 +419,19 @@ Input
 ---
 
 ## ⚠️ 남은 유지보수 항목
-> 아래 항목들은 🛠️ 유지보수 명세서로 이동됨. 해당 SPEC에서 구체적 해결 방안 확인.
-> ✅ 완료된 항목은 아래에서 제거됨.
 
-| 항목 | SPEC | 우선순위 |
-|------|------|----------|
-| 메모리 검색이 SQLite LIKE라 시맨틱 검색 없음 | SPEC-02 | HIGH |
-| 페르소나 프리셋 dead code (speech_preset, personality_preset) | SPEC-01 | HIGH |
-| `/settings/integrations/{key}` 백엔드 없음 | — | MEDIUM |
-| think:true 시 `<think>` 블록 응답에 노출 | — | MEDIUM |
+**2026-04-16 확인 기준 — 모든 SPEC 완료됨:**
+- [x] SPEC-01: 페르소나 프리셋 → `feat: SPEC-01` 커밋 완료
+- [x] SPEC-02: 시맨틱 메모리 검색 → `feat: SPEC-02` 커밋 완료
+- [x] SPEC-03~09: 2026-04-14 세션에서 전부 완료
+- [x] `<think>` 블록 노출 → `llm.py` `_THINK_TAG_PAT` 필터 이미 구현됨
+- [x] `/settings/integrations/{name}/test` → `settings.py:444` 이미 구현됨
 
-**2026-04-14 완료:**
-- [x] SPEC-04: LLM 다중 호출 최소화 (1회로 축소)
-- [x] SPEC-05: 무드 이중 업데이트 UI jitter 제거
-- [x] SPEC-06: 자아 형성 파이프라인
-- [x] SPEC-07: TTS 엔진 추상화 + 목소리 설정 UI
-- [x] SPEC-08: 시스템 프롬프트 구조 개선
-- [x] SPEC-09: interaction_type "coding" 분기 제거
-- [x] SPEC-03: 컨텍스트 파이프라인 무결성 (preference 조용한 실패 → 로깅, 한국어화, 임계값 60분)
-
----
-
-## 🔴 다음 세션에서 해결해야 할 이슈 (우선순위 순):
-
-### 1. SPEC-01: 페르소나 프리셋 dead code (HIGH)
-- `speech_preset`, `personality_preset`이 settings.json에 저장은 되나 LLM 프롬프트에 반영 안 됨
-- `backend/services/llm.py`에 `SPEECH_PRESET_PROMPTS`, `PERSONALITY_PRESET_PROMPTS` 딕셔너리 추가 + `build_system_prompt()` 연결
-- 상세 해결 방안: STATUS.md SPEC-01 섹션 참고
-
-### 2. SPEC-02: 메모리 검색 시맨틱 교체 (HIGH)
-- `search_memory`가 SQLite LIKE 텍스트 매칭 → "안녕" 검색 시 관련 기억 0개 반환
-- mem0 시맨틱 검색(`mem0.search()`)으로 교체 + `memory_facts`에 `mem0_id` 컬럼 추가
-- 상세 해결 방안: STATUS.md SPEC-02 섹션 참고
-
-### 3. `/settings/integrations/{key}` 백엔드 없음 (MEDIUM)
-- 연동 탭(Serper API / Google Calendar / GitHub) 키 저장/조회/테스트 엔드포인트 미구현
-- `GET /settings/integrations/{key}`, `POST /settings/integrations/{key}`, `POST /settings/integrations/{key}/test`
-- settings_service.py + settings.py 라우트 추가
-
-### 4. think:true 시 `<think>` 블록 응답에 그대로 노출 (MEDIUM)
-- qwen3 think 모드 `<think>...</think>` 블록이 클라이언트에 전송됨
-- `llm_router.py` 스트림 파서에 `<think>` 블록 필터링 추가 필요
-
-### 5. Redis 미실행 → Celery 전체 불능 (오너 환경)
-- **오너가 할 것:** `brew services start redis` 또는 `redis-server` 실행
-- 백엔드가 Redis 없어도 채팅은 동작하도록 설계되어 있으나 Celery 태스크(채점/요약/기억추출) 불능
-
+**현재 남은 미구현 항목:**
+| 항목 | 우선순위 | 비고 |
+|------|----------|------|
+| Redis 미실행 → Celery 불능 | — | 오너 환경 이슈. `brew services start redis` 실행 |
+| Phase 5 LoRA 파인튜닝 | ⬜ 미시작 | 진입 조건: dataset_message 500개 이상 |
 
 > 상세 완료 이력 → [HISTORY.md](HISTORY.md)
 
