@@ -366,11 +366,27 @@ async def delete_memory_fact(fact_id: str) -> None:
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
-현재 작업 브랜치: dev
-마지막 완료: 2026-04-16 STATUS.md 동기화 — SPEC-01/02/think블록 실제 완료 확인
+현재 작업 브랜치: claude/phase5-spec10-action-sync
+마지막 완료: 2026-04-16 SPEC-10 인라인 액션 태그 + 페르소나 일관성 강화
 블로커: 없음
 ⚠️ 오너 지시 (2026-03-26): Claude Code가 frontend/ 도 담당. Codex 역할 없음.
 ```
+
+**2026-04-16 세션에서 완료한 작업:**
+- [x] SPEC-10: 인라인 [action:xxx] 태그 기반 모션 싱크 시스템
+  - `characterController.js`: `_motionActive`, `_inlineActionsActive` 플래그, `playEmotionUpdate()`, `playInlineActions()`
+  - `useChat.js`: done 이벤트에서 태그 추출, 스트리밍 중 태그 숨김, 비동기 모션 실행
+  - `useMotionStream.js`: `playEmotionUpdate()` 사용으로 교체 (인라인 액션과 충돌 방지)
+  - `CharacterOverlay.jsx`: lipsync mouth_open 게이트 (`_motionActive` 시 스킵)
+  - `llm.py`: `build_system_prompt()` `available_actions` 주입 (⑬), `postprocess_for_voice()` 태그 제거
+  - `model_context_service.py`: `_AVAILABLE_ACTIONS` 상수, ctx에 포함
+  - `context_builder.py`: `get_current_context()`에서 available_actions 조회 후 프롬프트에 주입
+- [x] 페르소나 일관성 강화
+  - `_BEHAVIORAL_ANCHORS` 추가: 무드/말투 무관 행동 고정 원칙 (판단력 유지, 대화 일관성, 감정 솔직함)
+  - `_BASE_PROHIBITIONS` 보강: 모순 발언 금지, AI 감각 경험 단정 금지
+  - 4개 `PERSONALITY_PRESET_PROMPTS` 강화: 갈등/칭찬/실패/감정 등 상황별 반응 패턴 추가
+- [x] Live2D 모션 싱크 3개 버그 수정 (`claude/motion-sync-fix` 브랜치): MOTION_PRESETS 추가, playMotionSequence flatMap, MainWindow useMotionStream 마운트
+- [x] 프론트 83/83 테스트 통과
 
 **2026-04-14 세션에서 완료한 SPEC:**
 - [x] SPEC-09: interaction_type "coding" 분기 제거 → detect_room_type/should_use_think/build_system_prompt에서 제거
