@@ -147,6 +147,9 @@ PERSONALITY_PRESET_PROMPTS: dict[str, str] = {
 }
 
 
+_ACTION_TAG_PAT = re.compile(r"\[action:\w+\]")
+
+
 def build_system_prompt(
     mood: str = "IDLE",
     persona: Optional[dict] = None,
@@ -155,6 +158,7 @@ def build_system_prompt(
     memories: Optional[list[str]] = None,
     preferences: str = "",
     philosophy: str = "",
+    available_actions: Optional[list[str]] = None,
 ) -> str:
     # ① 정체성
     prompt = _BASE_IDENTITY
@@ -230,6 +234,22 @@ def build_system_prompt(
     if voice_mode:
         prompt += _VOICE_MODE_ADDITION
 
+    # ⑫ 인라인 액션 태그 (캐릭터 모션 동기화)
+    if available_actions and not voice_mode:
+        actions_str = ", ".join(f"[action:{a}]" for a in available_actions)
+        prompt += f"""
+
+## 인라인 액션 태그
+응답 텍스트 안에 아래 태그를 자연스럽게 삽입하면 캐릭터 모션이 동기화돼.
+사용 가능: {actions_str}
+
+예시:
+- 기쁠 때: "오 진짜?! [action:bounce] 대박이다!!"
+- 고개 끄덕: "맞아, 그 방향 맞아. [action:nod]"
+- 궁금할 때: "[action:tilt_head] 그거 어떻게 된 거야?"
+
+규칙: 텍스트 흐름에 자연스럽게. 1개 응답에 0~2개. 모든 응답에 넣지 않아도 됨."""
+
     return prompt
 
 
@@ -264,6 +284,8 @@ def should_use_think(message: str, interaction_type: Optional[str] = None) -> bo
 
 
 def postprocess_for_voice(content: str) -> str:
+    # [action:xxx] 태그 제거 (TTS 전 처리)
+    content = _ACTION_TAG_PAT.sub("", content)
     # 이모지 제거 (유니코드 이모지 범위)
     content = re.sub(
         r"[\U00010000-\U0010ffff"

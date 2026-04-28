@@ -149,7 +149,10 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
       const { type } = event.data || {};
 
       if (type === "lipsync_value") {
-        characterController.setAbstractParam("mouth_open", event.data.value ?? 0);
+        // 모션 재생 중에는 mouth_open 간섭하지 않음 (표정 우선)
+        if (!characterController._motionActive) {
+          characterController.setAbstractParam("mouth_open", event.data.value ?? 0);
+        }
         return;
       }
 

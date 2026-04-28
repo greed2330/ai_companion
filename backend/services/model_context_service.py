@@ -12,6 +12,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# 프론트엔드 characterController.js MOTION_PRESETS와 1:1 대응하는 액션 목록
+_AVAILABLE_ACTIONS: list[str] = [
+    "bounce", "wave", "lean_forward", "tilt_head", "jump", "spin",
+    "look_around", "nod", "smile", "cheer", "slow_sway", "yawn", "idle_sway",
+]
+
 # 추상 이름 → 모델 파라미터 이름 매핑 키워드
 _ABSTRACT_KEYWORDS: dict[str, list[str]] = {
     "head_x":    ["AngleX", "HeadX", "頭X"],
@@ -119,11 +125,12 @@ async def on_model_changed(
 
     mapping = _map_abstract(raw)
     _ctx = {
-        "model_id":       model_id,
-        "model_type":     model_type,
+        "model_id":         model_id,
+        "model_type":       model_type,
         "abstract_mapping": mapping,
-        "param_ranges":   raw,
-        "llm_context":    _build_llm_context(model_type, mapping, raw),
+        "param_ranges":     raw,
+        "llm_context":      _build_llm_context(model_type, mapping, raw),
+        "available_actions": _AVAILABLE_ACTIONS,
     }
 
     os.makedirs("data", exist_ok=True)

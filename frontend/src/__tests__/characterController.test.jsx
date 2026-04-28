@@ -171,6 +171,58 @@ describe("CharacterController", () => {
     expect(controller._silentMode).toBe(false);
   });
 
+  test("playEmotionUpdate is blocked when _inlineActionsActive", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    controller._inlineActionsActive = true;
+    await controller.playEmotionUpdate([{ abstract: "head_x", value: 10, duration: 200 }]);
+
+    expect(tweenSpy).not.toHaveBeenCalled();
+  });
+
+  test("playEmotionUpdate sets and clears _motionActive", async () => {
+    const controller = new CharacterController();
+    jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    const activeDuring = [];
+    const origReturn = controller.returnToDefault.bind(controller);
+    jest.spyOn(controller, "returnToDefault").mockImplementation(async (...args) => {
+      activeDuring.push(controller._motionActive);
+      return origReturn(...args);
+    });
+
+    await controller.playEmotionUpdate([{ abstract: "head_x", value: 10, duration: 200 }]);
+
+    expect(activeDuring[0]).toBe(true);
+    expect(controller._motionActive).toBe(false);
+  });
+
+  test("playInlineActions sets _inlineActionsActive during execution", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    const promise = controller.playInlineActions(["nod"]);
+    expect(controller._inlineActionsActive).toBe(true);
+    await promise;
+    expect(controller._inlineActionsActive).toBe(false);
+    expect(tweenSpy).toHaveBeenCalled();
+  });
+
+  test("playInlineActions skips unknown action names", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    await controller.playInlineActions(["totally_unknown_action"]);
+
+    expect(tweenSpy).not.toHaveBeenCalled();
+    expect(controller._inlineActionsActive).toBe(false);
+  });
+
   test("does not create duplicate silent presence loops", async () => {
     const controller = new CharacterController();
     await controller.init(

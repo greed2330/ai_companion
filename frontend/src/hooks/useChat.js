@@ -3,6 +3,9 @@ import { buildApiUrl } from "../services/api";
 import { submitFeedback as postFeedback } from "../services/feedback";
 import { OUTPUT_MODES } from "../constants/outputModes";
 import { ttsService } from "../services/tts";
+import { characterController } from "../services/characterController";
+
+const _ACTION_TAG_RE = /\[action:(\w+)\]/g;
 
 export default function useChat(
   conversationId,
@@ -102,20 +105,32 @@ export default function useChat(
             const event = JSON.parse(raw);
             if (event.type === "token") {
               accumulatedContent += event.content || "";
+              // [action:xxx] 태그는 표시하지 않고 누적만 함
+              const displayContent = accumulatedContent.replace(_ACTION_TAG_RE, "");
               setMessages((prev) =>
                 prev.map((message) =>
                   message.id === tempId
-                    ? { ...message, content: message.content + (event.content || "") }
+                    ? { ...message, content: displayContent }
                     : message
                 )
               );
             } else if (event.type === "done") {
+              // [action:xxx] 추출 후 정리된 텍스트로 최종 업데이트
+              const actions = [];
+              let actionMatch;
+              _ACTION_TAG_RE.lastIndex = 0;
+              while ((actionMatch = _ACTION_TAG_RE.exec(accumulatedContent)) !== null) {
+                actions.push(actionMatch[1]);
+              }
+              const cleanContent = accumulatedContent.replace(_ACTION_TAG_RE, "").trim();
+
               setMessages((prev) =>
                 prev.map((message) =>
                   message.id === tempId
                     ? {
                         ...message,
                         id: event.message_id,
+                        content: cleanContent,
                         streaming: false,
                         created_at: event.created_at || new Date().toISOString(),
                       }
@@ -127,8 +142,12 @@ export default function useChat(
               }
               onMessagePersisted?.();
               setIsStreaming(false);
-              if (isVoiceMode && accumulatedContent) {
-                ttsService.speak(accumulatedContent).catch(() => {});
+              // 인라인 액션 모션 큐 실행 (비동기, UI 블로킹 없음)
+              if (actions.length) {
+                characterController.playInlineActions(actions).catch(() => {});
+              }
+              if (isVoiceMode && cleanContent) {
+                ttsService.speak(cleanContent).catch(() => {});
               }
             } else if (event.type === "room_change") {
               onRoomChange?.(event.room_type || "일반");

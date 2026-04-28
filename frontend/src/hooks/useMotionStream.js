@@ -12,11 +12,11 @@ export function useMotionStream(conversationId) {
 
         if (payload.type === "emotion_update") {
           if (payload.motion_sequence?.length) {
-            await characterController.playMotionSequence(
+            // _inlineActionsActive 시 건너뜀 (playEmotionUpdate 내부에서 처리)
+            await characterController.playEmotionUpdate(
               payload.motion_sequence,
               payload.tension_level ?? 1
             );
-            await characterController.returnToDefault(800);
           }
 
           if (payload.overlay_effect) {

@@ -80,6 +80,9 @@ export class CharacterController {
     this._breathFrame = null;
     this._silentFrame = null;
     this._silentMode = false;
+    // SPEC-10: 모션 상태 머신
+    this._motionActive = false;       // 모션 재생 중 → lipsync/breathing 게이트
+    this._inlineActionsActive = false; // 인라인 액션 큐 실행 중 → emotion_update 게이트
   }
 
   async init(renderer, modelId) {
@@ -102,6 +105,8 @@ export class CharacterController {
     }
 
     this._silentMode = false;
+    this._motionActive = false;
+    this._inlineActionsActive = false;
     if (window.__characterRenderer === this) {
       delete window.__characterRenderer;
     }
@@ -314,7 +319,10 @@ export class CharacterController {
 
     let time = 0;
     const tick = () => {
-      this.setAbstractParam("body_y", Math.sin(time * 0.8) * 0.03);
+      // 모션 재생 중에는 body_y 간섭하지 않음
+      if (!this._motionActive) {
+        this.setAbstractParam("body_y", Math.sin(time * 0.8) * 0.03);
+      }
       time += 0.016;
       this._breathFrame = requestAnimationFrame(tick);
     };
@@ -338,9 +346,12 @@ export class CharacterController {
         return;
       }
 
-      this.setAbstractParam("body_y", Math.sin(time * 0.4) * 0.015);
-      this.setAbstractParam("eye_open", 0.85 + Math.sin(time * 0.3) * 0.05);
-      this.setAbstractParam("gaze_x", Math.sin(time * 0.15) * 0.05);
+      // 모션 재생 중에는 파라미터 간섭하지 않음
+      if (!this._motionActive) {
+        this.setAbstractParam("body_y", Math.sin(time * 0.4) * 0.015);
+        this.setAbstractParam("eye_open", 0.85 + Math.sin(time * 0.3) * 0.05);
+        this.setAbstractParam("gaze_x", Math.sin(time * 0.15) * 0.05);
+      }
       time += 0.016;
       this._silentFrame = requestAnimationFrame(tick);
     };
@@ -364,6 +375,41 @@ export class CharacterController {
     this._tween("eye_open", 1, 400, "ease_out");
     this._tween("head_y", 0, 400, "ease_out");
     this.startIdleBreathing();
+  }
+
+  // SPEC-10: emotion_update 폴백 — 인라인 액션 실행 중에는 건너뜀
+  async playEmotionUpdate(sequence, tensionLevel = 1) {
+    if (this._inlineActionsActive) {
+      return;
+    }
+    this._motionActive = true;
+    try {
+      await this.playMotionSequence(sequence, tensionLevel);
+      await this.returnToDefault(800);
+    } finally {
+      this._motionActive = false;
+    }
+  }
+
+  // SPEC-10: [action:xxx] 인라인 액션 큐 실행
+  async playInlineActions(actionNames) {
+    if (!actionNames?.length) {
+      return;
+    }
+    this._inlineActionsActive = true;
+    this._motionActive = true;
+    try {
+      for (const name of actionNames) {
+        if (!MOTION_PRESETS[name]) {
+          continue;
+        }
+        await this.playMotionSequence([name], 1);
+        await this.returnToDefault(600);
+      }
+    } finally {
+      this._motionActive = false;
+      this._inlineActionsActive = false;
+    }
   }
 
   showOverlayEffect(type, duration = 1500) {
