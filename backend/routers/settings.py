@@ -428,7 +428,44 @@ async def get_model_context() -> dict:
     return ctx
 
 
-# ── 외부 연동 테스트 엔드포인트 ───────────────────────────────────
+# ── 외부 연동 CRUD + 테스트 엔드포인트 ───────────────────────────
+
+
+@router.get("/settings/integrations/{name}")
+async def get_integration(name: str) -> dict:
+    """연동 상태 조회. status: 'disconnected' | 'key_present' | 'connected'"""
+    from backend.services.settings_service import (
+        get_integration as _get, _VALID_INTEGRATIONS,
+    )
+    if name not in _VALID_INTEGRATIONS:
+        raise HTTPException(status_code=404, detail={
+            "error": True,
+            "code": "UNKNOWN_INTEGRATION",
+            "message": f"'{name}' 연동은 지원하지 않아.",
+        })
+    return _get(name)
+
+
+class IntegrationSaveRequest(BaseModel):
+    key: str
+
+
+@router.post("/settings/integrations/{name}")
+async def save_integration_key(name: str, req: IntegrationSaveRequest) -> dict:
+    """API 키 저장."""
+    from backend.services.settings_service import (
+        set_integration_key as _set, _VALID_INTEGRATIONS,
+    )
+    if name not in _VALID_INTEGRATIONS:
+        raise HTTPException(status_code=404, detail={
+            "error": True,
+            "code": "UNKNOWN_INTEGRATION",
+            "message": f"'{name}' 연동은 지원하지 않아.",
+        })
+    _set(name, req.key)
+    logger.info(f"/settings/integrations/{name} key saved")
+    return {"success": True}
+
 
 _INTEGRATION_HANDLERS: dict[str, str] = {
     "serper":           "https://google.serper.dev/search",

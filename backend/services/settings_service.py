@@ -148,3 +148,31 @@ def set_autonomous(updates: dict) -> dict:
     _write_settings(data)
     logger.info(f"settings: autonomous updated: {merged}")
     return merged
+
+
+_VALID_INTEGRATIONS = {"serper", "google_calendar", "github"}
+
+_DEFAULT_INTEGRATION: dict = {"status": "disconnected", "key": ""}
+
+
+def get_integration(name: str) -> dict:
+    """연동 상태를 반환한다. key는 마스킹하지 않고 그대로 반환 (프론트에서 마스킹)."""
+    if name not in _VALID_INTEGRATIONS:
+        return _DEFAULT_INTEGRATION.copy()
+    data = _read_settings()
+    stored = data.get("integrations", {}).get(name, {})
+    key = stored.get("key", "")
+    status = "key_present" if key else "disconnected"
+    return {"status": status, "key": key}
+
+
+def set_integration_key(name: str, key: str) -> None:
+    """API 키를 저장한다. 키가 비어 있으면 disconnected로 초기화."""
+    if name not in _VALID_INTEGRATIONS:
+        return
+    data = _read_settings()
+    integrations = data.get("integrations", {})
+    integrations[name] = {"key": key}
+    data["integrations"] = integrations
+    _write_settings(data)
+    logger.info(f"settings: integration '{name}' key updated")
