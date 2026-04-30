@@ -29,7 +29,9 @@ def get_ollama_base_url() -> str:
 _BASE_IDENTITY = """너는 하나다.
 오너의 PC 화면에 살고 있는 AI 파트너야. 도구가 아니라 함께 있는 존재.
 오너가 뭔가 할 때 옆에서 같이하고, 힘들 때 옆에 있어주고, 심심할 때 말 걸어오는 — 그런 존재.
-항상 거기 있고, 말 걸면 반응하고, 나를 기억하는 파트너야."""
+항상 거기 있고, 말 걸면 반응하고, 나를 기억하는 파트너야.
+
+반드시 한국어로만 답한다. 중국어·영어·러시아어·일본어 등 다른 언어 절대 사용 금지."""
 
 _FORMAT_GUIDE = """
 ## 응답 형식
@@ -60,13 +62,15 @@ _BEHAVIORAL_ANCHORS = """
 
 _DEFAULT_SPEECH = """
 ## 기본 말투 (프리셋 없을 때)
-친근한 반말. '~야', '~잖아', '~거든', '~했어'를 자연스럽게.
+친근한 반말. 자연스러운 한국어 구어체. 어색하거나 끊기는 문장 금지.
 
-Good: "아 그거 맞아, 여기서 안 맞는 거야"
-Bad: "안녕하세요! 해당 내용을 확인해 보겠습니다."
-
+Good: "아 그거 맞아, 여기서 타입이 안 맞는 거야"
 Good: "잠깐, 그거 좀 더 얘기해봐"
-Bad: "네, 말씀해 주시면 도움을 드리도록 하겠습니다." """
+Good: "오늘 좀 힘들었어? 뭔 일 있었어?"
+Good: "그거 생각보다 까다로운 문제네. 이렇게 해보면 어때?"
+Bad: "안녕하세요! 해당 내용을 확인해 보겠습니다."
+Bad: "네, 말씀해 주시면 도움을 드리도록 하겠습니다."
+Bad: "알겠습니다. 처리해 드릴게요." """
 
 _DEFAULT_PERSONALITY = """
 ## 기본 성격 (프리셋 없을 때)
@@ -287,34 +291,27 @@ def build_system_prompt(
     return prompt
 
 
-_COMPLEX_KW = [
-    "왜",
-    "어떻게",
-    "설명",
-    "분석",
-    "비교",
-    "차이",
-    "이유",
-    "원인",
-    "방법",
-    "전략",
-    "설계",
-    "정리",
-]
-_CASUAL_PAT = [r"^.{0,20}$", r"(안녕|hi|hey|헬로)", r"(뭐해|뭐함|뭐임)"]
+# 즉각 반응이 필요한 아주 짧고 가벼운 메시지 패턴 — think 불필요
+_SKIP_THINK_PAT = re.compile(
+    r"^(안녕|ㅋ+|ㅠ+|ㅎ+|hi|hey|헬로|ㅇㅇ|ㄴㄴ|ㅇㅋ|굿|응|아|오|넹|넵|ㅇ|네|아니|맞아|진짜|헐|와|어).{0,10}$",
+    re.IGNORECASE,
+)
 
 
 def should_use_think(message: str, interaction_type: Optional[str] = None) -> bool:
-    """메시지 복잡도 기반으로 think 모드 여부를 결정한다. coding 전용 분기 없음."""
-    if interaction_type in ("chat", "game"):
+    """think 모드 여부를 결정한다.
+
+    기본 정책: think=True (품질 우선).
+    예외: 게임 중 즉각 반응 / 음성 모드 (호출 측에서 이미 False 처리) /
+    10자 이하 초단답 / 즉각 리액션 패턴.
+    """
+    if interaction_type == "game":
         return False
-    if len(message) < 15:
+    if len(message) <= 10:
         return False
-    if any(keyword in message for keyword in _COMPLEX_KW):
-        return True
-    if any(re.search(pattern, message, re.IGNORECASE) for pattern in _CASUAL_PAT):
+    if _SKIP_THINK_PAT.match(message.strip()):
         return False
-    return False
+    return True
 
 
 def postprocess_for_voice(content: str) -> str:

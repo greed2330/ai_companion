@@ -410,10 +410,18 @@ async def run_chat_pipeline(
                 yield f"data: {json.dumps(room_event, ensure_ascii=False)}\n\n"
 
             # 히스토리 + 메모리 병렬 조회
-            history, memories = await asyncio.gather(
-                _load_recent_messages(db, cid),
-                search_memory(_OWNER_USER_ID, message),
-            )
+            # 짧은 잡담(≤12자)·게임 즉각반응은 메모리 검색 생략 (지연 방지)
+            _skip_memory = len(message.strip()) <= 12 or interaction_type == "game"
+            if _skip_memory:
+                history, memories = await asyncio.gather(
+                    _load_recent_messages(db, cid),
+                    asyncio.sleep(0, result=[]),
+                )
+            else:
+                history, memories = await asyncio.gather(
+                    _load_recent_messages(db, cid),
+                    search_memory(_OWNER_USER_ID, message),
+                )
             for mem in memories:
                 await update_confidence(mem["id"], delta=0.1)
 
