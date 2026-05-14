@@ -15,13 +15,21 @@
 Phase 1 (대화 AI 코어)     : ✅ 백엔드 완료, 프론트 완료
 Phase 2 (기억)             : ✅ 백엔드 완료 (merged)
 Phase 3 (화면 상주)        : 🔵 백엔드 완료 (PR 대기), 프론트 완료 (PR 대기) — dev 통합 검증 대기
-Phase 4 (MCP/도구)         : ⬜ 미시작
+Phase 4 (MCP/도구)         : 🚫 보류 — 오너 결정 (2026-05-14)
 Phase 4.5 (음성)           : 🔵 백엔드+프론트+Live2D+채점+일기 완료 (PR 대기)
 Phase 5 (파인튜닝)         : ⬜ 미시작
 Phase 6 (마인크래프트)     : ⬜ 미시작
 Phase 7 (빌드/패키징)      : ⬜ 미시작
 Phase 7.5 (법적 준수)      : ⬜ 항목 정리 완료, 실행 미시작
 ```
+
+## ❌ 미구현 확정 항목 (오너 결정 2026-05-14)
+
+| 항목 | 이유 | 코드 상태 |
+|------|------|-----------|
+| 삐짐(sulky) 시스템 | 구현 안 하기로 결정 | `proactive_service.py`에서 sulky 체크 제거. `sulky_service.py` 파일 생성하지 않음 |
+| 화면 인식 (OS API + Vision) | 구현 안 하기로 결정 | `screen.py` stub 유지. `CharacterPanel`의 "화면 주시" 토글은 설정 저장만 됨 |
+| MCP/도구 실행 (Phase 4) | 보류 | `mcp.py` stub 유지. 연결 없음 |
 
 ---
 
@@ -367,9 +375,10 @@ async def delete_memory_fact(fact_id: str) -> None:
 
 ```
 현재 작업 브랜치: claude/phase5-spec10-action-sync
-마지막 완료: 2026-04-16 SPEC-10 인라인 액션 태그 + 페르소나 일관성 강화
+마지막 완료: 2026-05-14 런타임 버그 수정 + 미구현 항목 정리
 블로커: 없음
 ⚠️ 오너 지시 (2026-03-26): Claude Code가 frontend/ 도 담당. Codex 역할 없음.
+⚠️ 오너 결정 (2026-05-14): 삐짐 시스템, 화면 인식, MCP 미구현 확정.
 ```
 
 **2026-04-16 세션에서 완료한 작업:**
@@ -443,11 +452,18 @@ Input
 - [x] `<think>` 블록 노출 → `llm.py` `_THINK_TAG_PAT` 필터 이미 구현됨
 - [x] `/settings/integrations/{name}/test` → `settings.py:444` 이미 구현됨
 
+**2026-05-14 버그 수정:**
+- [x] BUG-1: `proactive_service.py` sulky_service import 제거 → `/proactive/check` 500 에러 수정
+- [x] BUG-2: `AIModelPanel.jsx` speech options `calm_sister`→`calm_mentor`, `playful` 제거
+- [x] BUG-3: `IntegrationsPanel.jsx` testIntegration body에 `api_key` 추가
+- [x] BUG-4: `/conversations` 쿼리에 `first_user_message`, `last_message_content` 추가
+
 **현재 남은 미구현 항목:**
 | 항목 | 우선순위 | 비고 |
 |------|----------|------|
 | Redis 미실행 → Celery 불능 | — | 오너 환경 이슈. `brew services start redis` 실행 |
 | Phase 5 LoRA 파인튜닝 | ⬜ 미시작 | 진입 조건: dataset_message 500개 이상 |
+| 삐짐·화면인식·MCP | 🚫 미구현 확정 | 위 ❌ 섹션 참조 |
 
 > 상세 완료 이력 → [HISTORY.md](HISTORY.md)
 

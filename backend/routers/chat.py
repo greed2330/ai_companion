@@ -104,10 +104,31 @@ async def conversations(limit: int = 20) -> dict:
         ) as cursor:
             rows = await cursor.fetchall()
 
-    result = [
-        {"id": r[0], "started_at": r[1], "session_summary": r[2]}
-        for r in rows
-    ]
+        result = []
+        for r in rows:
+            cid = r[0]
+            # 첫 번째 user 메시지
+            async with db.execute(
+                "SELECT content FROM messages WHERE conversation_id = ? AND role = 'user' "
+                "ORDER BY created_at ASC LIMIT 1",
+                (cid,),
+            ) as c:
+                first_row = await c.fetchone()
+            # 마지막 메시지
+            async with db.execute(
+                "SELECT content FROM messages WHERE conversation_id = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (cid,),
+            ) as c:
+                last_row = await c.fetchone()
+            result.append({
+                "id":                  cid,
+                "started_at":          r[1],
+                "session_summary":     r[2],
+                "first_user_message":  first_row[0] if first_row else None,
+                "last_message_content": last_row[0] if last_row else None,
+            })
+
     return {"conversations": result}
 
 
