@@ -13,10 +13,21 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # 프론트엔드 characterController.js MOTION_PRESETS와 1:1 대응하는 액션 목록
-_AVAILABLE_ACTIONS: list[str] = [
-    "bounce", "wave", "lean_forward", "tilt_head", "jump", "spin",
-    "look_around", "nod", "smile", "cheer", "slow_sway", "yawn", "idle_sway",
-]
+# 키: 액션 키워드 / 값: 언제 쓸지 힌트 (시스템 프롬프트에 주입됨)
+_AVAILABLE_ACTIONS: dict[str, str] = {
+    "끄덕이기":   "동의, 이해, 확인할 때",
+    "갸웃하기":   "의문, 모를 때, 흥미로울 때",
+    "고개젓기":   "부정, 모르겠음",
+    "활짝웃기":   "기쁨, 성공, 좋은 소식",
+    "놀라기":     "예상치 못한 정보, 충격",
+    "걱정하기":   "안타까움, 우려, 부정적 상황",
+    "생각하기":   "고민 중, 답을 찾는 중",
+    "하품하기":   "졸릴 때, 새벽 대화",
+    "수줍어하기": "칭찬받을 때, 부끄러운 상황",
+    "반짝이는눈": "흥미로운 것 발견, 엄청 마음에 들 때",
+    "울먹이기":   "감동적인 얘기, 슬픈 상황 공감",
+    "긴장하기":   "어려운 작업, 불확실한 결과 기다릴 때",
+}
 
 # 추상 이름 → 모델 파라미터 이름 매핑 키워드
 _ABSTRACT_KEYWORDS: dict[str, list[str]] = {

@@ -80,8 +80,8 @@ describe("CharacterController", () => {
     const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
     await controller.init(createLive2dRenderer(), "hana");
 
-    // "bounce" → [{abstract:"head_y",...},{abstract:"body_y",...}]
-    await controller.playMotionSequence(["bounce"], 1);
+    // "끄덕이기" → [{abstract:"head_y",...},{abstract:"smile",...}]
+    await controller.playMotionSequence(["끄덕이기"], 1);
 
     expect(tweenSpy).toHaveBeenCalledWith("head_y", expect.any(Number), 200, "ease_out");
   });
@@ -103,12 +103,12 @@ describe("CharacterController", () => {
     await controller.init(createLive2dRenderer(), "hana");
 
     await controller.playMotionSequence([
-      "nod",
+      "끄덕이기",
       { abstract: "smile", value: 0.5, duration: 200 }
     ]);
 
-    // "nod" expands to head_y step; "smile" is a direct step
-    expect(tweenSpy).toHaveBeenCalledWith("head_y", expect.any(Number), 300, "ease_in_out");
+    // "끄덕이기" expands to head_y step; "smile" is a direct step
+    expect(tweenSpy).toHaveBeenCalledWith("head_y", expect.any(Number), 200, "ease_out");
     expect(tweenSpy).toHaveBeenCalledWith("smile", 0.5, 200, "ease_out");
   });
 
@@ -205,7 +205,7 @@ describe("CharacterController", () => {
     const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
     await controller.init(createLive2dRenderer(), "hana");
 
-    const promise = controller.playInlineActions(["nod"]);
+    const promise = controller.playInlineActions(["끄덕이기"]);
     expect(controller._inlineActionsActive).toBe(true);
     await promise;
     expect(controller._inlineActionsActive).toBe(false);

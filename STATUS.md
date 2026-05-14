@@ -370,12 +370,208 @@ async def delete_memory_fact(fact_id: str) -> None:
 
 ---
 
+### [SPEC-12] STT 기능 검증 및 수정 🔵 기본 구현 완료, 확장 설계 대기
+
+#### 완료된 작업 (2026-05-14)
+- [x] `requirements.txt` 에 `openai-whisper==20231117` 추가
+- [x] `ChatInput.jsx` 마이크 버튼 활성화 (click-to-talk)
+- [x] `sttService.start()` / `stop()` 버튼에 연결
+- [x] 녹음 완료 후 텍스트 → `onSend()` 자동 전송
+- [x] 녹음 중 pulse 애니메이션 CSS (`.voice-btn.recording`)
+- [x] 테스트 67/67 통과
+
+#### 현황 분석 (2026-05-14)
+
+**버그: `openai-whisper` 가 `requirements.txt` 에 없음**
+- `backend/services/stt_whisper.py` 는 완성되어 있음
+- `_get_model()` 내부에서 `import whisper` (lazy load)
+- `requirements.txt` 에 `openai-whisper` 가 누락 → 새 venv 생성 시 STT 완전 불능
+
+**현재 파이프라인 (코드 기준):**
+```
+마이크 버튼 클릭 (VoicePanel.jsx)
+  → useVoice.js: MediaRecorder로 오디오 녹음
+  → POST /voice/stt (multipart/form-data, audio: wav blob)
+  → backend/routers/voice.py
+  → backend/services/voice_input.py → transcribe()
+  → backend/services/stt_whisper.py → WhisperSTTEngine.transcribe()
+    → whisper.load_model("base") lazy init
+    → model.transcribe(tmp_path, language="ko", fp16=False)
+  → {"text": "...", "confidence": 0.0~1.0, "language": "ko"}
+  → useVoice.js: setText(result.text) → 채팅 입력창에 주입
+```
+
+**검증 항목:**
+1. `requirements.txt` 에 `openai-whisper` 추가
+2. `/voice/stt` 엔드포인트 응답 확인 (curl 테스트)
+3. `VoicePanel.jsx` 마이크 버튼 클릭 → 녹음 시작 → 전송 → 텍스트 반환 확인
+4. 채팅 입력창에 텍스트 자동 주입 확인
+5. `WHISPER_MODEL` 환경변수 미설정 시 기본값 `"base"` 적용 여부
+
+**관련 파일:**
+- `backend/requirements.txt` — `openai-whisper` 추가
+- `backend/services/stt_whisper.py` — 엔진 구현 (변경 불필요)
+- `backend/services/voice_input.py` — 라우팅 레이어 (변경 불필요)
+- `backend/routers/voice.py` — ImportError 처리 경로 확인
+- `frontend/src/hooks/useVoice.js` — 녹음 → 전송 → 주입 플로우
+
+#### 수정 내용
+
+**1. `requirements.txt` 수정:**
+```
+openai-whisper==20231117
+```
+> `openai-whisper` 는 버전 태그 없이 최신 설치하거나, 위 버전을 명시. ffmpeg 시스템 의존성 주의 (macOS: `brew install ffmpeg`).
+
+**2. `backend/routers/voice.py` ImportError 처리 확인:**
+```python
+try:
+    from backend.services.voice_input import transcribe
+except ImportError:
+    # 이미 처리되어 있다면 pass, 없으면 추가
+    ...
+```
+
+#### 확장 설계 — STT 입력 모드 선택 (추후 구현)
+
+오너 결정 (2026-05-14): 기본 버튼 연결 완료 후, 설정창에 STT 모드 선택 UI 추가 예정.
+
+| 모드 | 설명 | 구현 복잡도 |
+|------|------|-------------|
+| **Click-to-talk** (현재) | 클릭 → 녹음 시작, 재클릭 → 전송 | ✅ 완료 |
+| **Hold-to-talk** | 버튼 누르는 동안만 녹음 (mousedown/mouseup) | 낮음 — 이벤트 방식만 변경 |
+| **Hotkey STT** | 지정 키(예: Alt+M) 누르는 동안 녹음 | 중간 — Electron globalShortcut 추가 필요 |
+| **Always-on VAD** | 상시 마이크 + 음성 감지(VAD) 시 자동 전송 | 높음 — VAD 라이브러리 또는 silence detection 필요 |
+
+**구현 위치 (추후):**
+- 설정창 `VoicePanel.jsx` 에 "음성 입력 모드" 섹션 추가
+- `ChatInput.jsx` 에 `inputMode` prop 추가 (click / hold / always)
+- `electron/main.js` 에 hotkey STT 모드 globalShortcut 등록
+- `backend/settings_service.py` 에 `voice.inputMode` 저장
+
+#### 완료 기준
+- `pip install -r backend/requirements.txt` 실행 후 `import whisper` 성공
+- 마이크 버튼 클릭 → 녹음 시작(pulse 애니메이션) → 재클릭 → 텍스트 자동 전송
+- Whisper 없을 때 SpeechRecognition API fallback 동작
+
+---
+
+### [SPEC-13] TTS 립싱크 파이프라인 복구 🔵 완료
+
+#### 현황 분석 (2026-05-14)
+
+**버그: `lipsync.js` 가 아무 곳에도 import 안 됨 → 립싱크 완전 죽어있음**
+
+`lipsync.js` 는 모듈 레벨에서 `window.addEventListener('tts-start', ...)` 를 등록한다.
+이 리스너가 동작하려면 MainWindow 번들 안에서 `lipsync.js` 가 import 되어야 한다.
+그런데 현재 프로덕션 코드 어디에도 `import ... from "../services/lipsync"` 가 없음.
+테스트 파일(`lipsync.test.jsx`)에서만 import됨. **모듈 자체가 데드 코드 상태.**
+
+**전체 파이프라인 (설계):**
+```
+useChat.js: ttsService.speak(text)        ← MainWindow
+  → tts.js _playBlob(): audio.onplay
+    → window.dispatchEvent('tts-start', {audio})   ← MainWindow window
+      → lipsync.js (MISSING IMPORT): lipSyncService.start(audio)
+        → AudioContext.createMediaElementSource(audio)
+        → AnalyserNode fftSize=256
+        → requestAnimationFrame loop:
+            frequencyData[bins 3~30] → average / 64 → value 0~1
+            BroadcastChannel("hana-overlay").postMessage({type: "lipsync_value", value})
+              → CharacterOverlay.jsx (CharacterWindow):  ← CharacterWindow
+                  BroadcastChannel.onmessage
+                  → characterController.setAbstractParam("mouth_open", value)
+                    → model.setParameterValueById("ParamMouthOpenY", value)
+```
+
+**`_motionActive` 게이트 (정상):**
+- CharacterOverlay.jsx:146: `if (!characterController._motionActive)` 조건 있음
+- 감정 모션 재생 중에는 입 파라미터 간섭하지 않음 → 설계 정상
+
+**BroadcastChannel 크로스-윈도우 동작:**
+- Electron 에서 같은 origin(localhost:3000)의 BrowserWindow 간 BroadcastChannel 동작 확인됨
+- MainWindow에서 postMessage → CharacterWindow에서 수신 정상
+
+**수정 위치: `frontend/src/hooks/useChat.js` 또는 `frontend/src/App.jsx`**
+
+#### 수정 내용
+
+**`frontend/src/hooks/useChat.js` 상단에 bare import 추가:**
+```javascript
+import "../services/lipsync"; // tts-start/tts-end 이벤트 리스너 등록
+```
+
+이것만으로 모듈 레벨 코드가 실행되어 리스너 2개가 등록됨:
+```javascript
+window.addEventListener("tts-start", (event) => {
+  lipSyncService.start(event.detail?.audio);
+});
+window.addEventListener("tts-end", () => {
+  lipSyncService.stop();
+});
+```
+
+> `App.jsx` 에 추가해도 동일한 효과. `useChat.js` 가 더 의미론적으로 맞음 (TTS 사용처와 동일).
+
+**추가 검증 — `tts.js` `_playBlob()` 타이밍:**
+```javascript
+audio.onplay = () => {
+  window.dispatchEvent(new CustomEvent("tts-start", {
+    detail: { audio, params }
+  }));
+};
+```
+`audio.onplay` 가 `audio.play()` **이후** 비동기로 발화함.
+`AudioContext.createMediaElementSource(audio)` 는 `onplay` 콜백 시점에 오디오가
+이미 재생 중이므로 정상적으로 소스를 잡음 → 타이밍 문제 없음.
+
+**fallback 경로 (`_fallback` — SpeechSynthesis):**
+`tts-start` 에 `audio: null` 로 발화됨 → `lipSyncService.start(null)` → `_dummy()` 호출
+→ 사인파 시뮬레이션으로 입 움직임 유지 → 정상
+
+#### 완료된 작업 (2026-05-14)
+- [x] `useChat.js` 상단에 `import "../services/lipsync"` 추가 → MainWindow에서 tts-start/tts-end 리스너 등록
+- [x] `useChat.js` `sendMessage()` 시작부에 `ttsService.stop()` 추가 → TTS 인터럽트 구현
+- [x] 테스트 67/67 통과
+
+#### 완료 기준
+- TTS 응답 재생 시 캐릭터 입이 음성에 맞춰 열리고 닫힘
+- 감정 모션 재생 중에는 립싱크가 간섭하지 않음
+- TTS 종료 시 `ParamMouthOpenY` 가 0으로 복귀
+- 새 메시지 전송 시 재생 중이던 TTS 즉시 중단
+
+---
+
+### [SPEC-11] Live2D 모션 시스템 🔵 Phase A 완료
+
+> 📄 **상세 설계 문서 → [SPEC11_LIVE2D_MOTION.md](SPEC11_LIVE2D_MOTION.md)**
+
+#### 진행 상황 (2026-05-14)
+
+**Phase A 완료:**
+- `characterController.js`: `MOTION_PRESETS` 한국어 키워드 12개로 교체
+- `characterController.js`: `_defaultMapping()` 신규 파라미터 추가 (cheek, eye_l_smile, brow_l_angle, glitter_eyes, nervous, tear 등)
+- `characterController.js`: `startIdleBreathing()` Live2D 분기 추가 (ParamBreath + head sway)
+- `useChat.js`: 태그 정규식 `[action:([^\]]+)]` 한국어 지원
+- `model_context_service.py`: `_AVAILABLE_ACTIONS` dict (키워드 → 설명)
+- `llm.py`: 태그 정규식 + 시스템 프롬프트 주입 포맷 업데이트
+- 테스트: `characterController.test.jsx` 67/67 통과
+
+**Phase B (TTS 세그먼트 연계):** 추후 구현  
+**Phase D (시각 검증):** 오너 환경에서 Hachiware 모델로 12개 모션 확인 필요
+
+---
+
+> **완료된 SPEC(03-09) 전체 설계 문서 → [SPECS_ARCHIVE.md](SPECS_ARCHIVE.md)**
+
+---
+
 ## 🔵 Claude Code 상태 (백엔드 + 프론트엔드 전담)
 > 이 섹션은 Claude Code만 수정합니다.
 
 ```
 현재 작업 브랜치: claude/phase5-spec10-action-sync
-마지막 완료: 2026-05-14 런타임 버그 수정 + 미구현 항목 정리
+마지막 완료: 2026-05-14 SPEC-11 Phase A (한국어 모션 12개 + 파라미터 확장 + idle Live2D 루프)
 블로커: 없음
 ⚠️ 오너 지시 (2026-03-26): Claude Code가 frontend/ 도 담당. Codex 역할 없음.
 ⚠️ 오너 결정 (2026-05-14): 삐짐 시스템, 화면 인식, MCP 미구현 확정.

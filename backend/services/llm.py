@@ -262,7 +262,7 @@ PERSONALITY_PRESET_PROMPTS: dict[str, str] = {
 }
 
 
-_ACTION_TAG_PAT = re.compile(r"\[action:\w+\]")
+_ACTION_TAG_PAT = re.compile(r"\[action:[^\]]+\]")
 
 
 def build_system_prompt(
@@ -273,7 +273,7 @@ def build_system_prompt(
     memories: Optional[list[str]] = None,
     preferences: str = "",
     philosophy: str = "",
-    available_actions: Optional[list[str]] = None,
+    available_actions: Optional[dict[str, str]] = None,
 ) -> str:
     # ① 정체성
     prompt = _BASE_IDENTITY
@@ -354,19 +354,18 @@ def build_system_prompt(
 
     # ⑬ 인라인 액션 태그 (캐릭터 모션 동기화)
     if available_actions and not voice_mode:
-        actions_str = ", ".join(f"[action:{a}]" for a in available_actions)
+        actions_lines = "\n".join(
+            f"  [action:{k}] — {v}" for k, v in available_actions.items()
+        )
         prompt += f"""
 
 ## 인라인 액션 태그
 응답 텍스트 안에 아래 태그를 자연스럽게 삽입하면 캐릭터 모션이 동기화돼.
-사용 가능: {actions_str}
 
-예시:
-- 기쁠 때: "오 진짜?! [action:bounce] 대박이다!!"
-- 고개 끄덕: "맞아, 그 방향 맞아. [action:nod]"
-- 궁금할 때: "[action:tilt_head] 그거 어떻게 된 거야?"
+{actions_lines}
 
-규칙: 텍스트 흐름에 자연스럽게. 1개 응답에 0~2개. 모든 응답에 넣지 않아도 됨."""
+예시: "음 모르겠는데? [action:갸웃하기] 그래도 괜찮을 것 같아 [action:끄덕이기]"
+규칙: 텍스트 흐름에 자연스럽게. 1개 응답에 0~2개. 어울리지 않으면 쓰지 마."""
 
     return prompt
 

@@ -4,8 +4,9 @@ import { submitFeedback as postFeedback } from "../services/feedback";
 import { OUTPUT_MODES } from "../constants/outputModes";
 import { ttsService } from "../services/tts";
 import { characterController } from "../services/characterController";
+import "../services/lipsync"; // tts-start/tts-end 이벤트 리스너 등록 (side-effect import)
 
-const _ACTION_TAG_RE = /\[action:(\w+)\]/g;
+const _ACTION_TAG_RE = /\[action:([^\]]+)\]/g;
 
 export default function useChat(
   conversationId,
@@ -38,6 +39,9 @@ export default function useChat(
     if (!text.trim() || isStreaming) {
       return;
     }
+
+    // 재생 중인 TTS가 있으면 즉시 중단하고 새 응답 시작
+    ttsService.stop();
 
     // Read outputMode from Electron store at send time so it reflects the latest saved setting.
     const appSettings = await window.hanaDesktop?.getAppSettings?.() || {};

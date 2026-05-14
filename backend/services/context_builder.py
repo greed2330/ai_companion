@@ -126,7 +126,7 @@ async def build_context(
         logger.error("SPEC-06 warmth/identity 주입 실패: %s", e)
 
     # SPEC-10: 캐릭터 모델이 로드된 경우 available_actions 주입
-    available_actions: list[str] = []
+    available_actions: dict[str, str] = {}
     try:
         from backend.services.model_context_service import get_current_context
         model_ctx = get_current_context()
