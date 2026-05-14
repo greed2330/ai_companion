@@ -12,3 +12,4 @@ python-multipart==0.0.20
 kokoro==0.9.4
 soundfile==0.12.1
 numpy==1.26.4
+edge-tts==7.2.8
