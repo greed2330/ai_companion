@@ -115,7 +115,6 @@ def set_persona(persona_data: dict) -> None:
 
 _DEFAULT_AUTONOMOUS: dict = {
     "proactive_chat": False,
-    "tip_bubbles": True,
     "screen_reaction": True,
     "schedule_reminder": False,
     "auto_crawl": False,

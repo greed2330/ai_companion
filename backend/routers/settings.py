@@ -391,7 +391,6 @@ async def get_autonomous_settings() -> dict:
 
 class AutonomousRequest(BaseModel):
     proactive_chat: bool | None = None
-    tip_bubbles: bool | None = None
     screen_reaction: bool | None = None
     schedule_reminder: bool | None = None
     auto_crawl: bool | None = None

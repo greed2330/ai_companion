@@ -28,9 +28,6 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   getCharacterState() {
     return ipcRenderer.invoke("character:get-state");
   },
-  hideBubble() {
-    ipcRenderer.send("hide-bubble");
-  },
   charPositionApply(payload) {
     return ipcRenderer.invoke("char-position-apply", payload);
   },
@@ -58,12 +55,6 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   notifyCharacterMouse(isInside) {
     ipcRenderer.send(isInside ? "char-mouse-enter" : "char-mouse-leave");
   },
-  onBubbleData(callback) {
-    return createListener("bubble-data", callback);
-  },
-  onBubbleTail(callback) {
-    return createListener("bubble-tail", callback);
-  },
   onCharacterSettingsUpdated(callback) {
     return createListener("character-settings-updated", callback);
   },
@@ -84,9 +75,6 @@ contextBridge.exposeInMainWorld("hanaDesktop", {
   },
   settingsSaved(payload) {
     ipcRenderer.send("settings-saved", payload);
-  },
-  showBubble(payload) {
-    ipcRenderer.send("show-bubble", payload);
   },
   showChatWindow() {
     ipcRenderer.send("open-main-chat");

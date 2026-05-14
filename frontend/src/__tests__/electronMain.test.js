@@ -130,33 +130,13 @@ describe("electron main windows", () => {
     electron.globalShortcut.register.mockClear();
   });
 
-  test("bubbleWindow show/hide leaves character bounds unchanged", () => {
-    const electron = require("electron");
-    const main = require("../../electron/main");
-
-    main.createWindows();
-    const characterWindow = electron.__windows[0];
-    const bubbleWindow = electron.__windows[1];
-    const initialBounds = characterWindow.getBounds();
-
-    electron.__listeners["show-bubble"](null, {
-      message: "hello",
-      mood: "IDLE",
-      type: "talk"
-    });
-    electron.__listeners["hide-bubble"]();
-
-    expect(characterWindow.getBounds()).toEqual(initialBounds);
-    expect(bubbleWindow.showInactive).toHaveBeenCalled();
-    expect(bubbleWindow.hide).toHaveBeenCalled();
-  });
-
   test("IPC open-main-settings activates settings tab", () => {
     const electron = require("electron");
     const main = require("../../electron/main");
 
     main.createWindows();
-    const unifiedWindow = electron.__windows[2];
+    // windows[0] = characterWindow, windows[1] = mainWindow
+    const unifiedWindow = electron.__windows[1];
 
     electron.__listeners["open-main-settings"]();
 
@@ -169,7 +149,7 @@ describe("electron main windows", () => {
     let main = require("../../electron/main");
 
     main.createWindows();
-    const firstMainWindow = electron.__windows[2];
+    const firstMainWindow = electron.__windows[1];
     firstMainWindow.setPosition(222, 333);
     firstMainWindow.listeners.move();
 
@@ -179,7 +159,7 @@ describe("electron main windows", () => {
     main = require("../../electron/main");
     main.createWindows();
 
-    const secondMainWindow = electron.__windows[2];
+    const secondMainWindow = electron.__windows[1];
     expect(secondMainWindow.setPosition).toHaveBeenCalledWith(222, 333);
   });
 
@@ -189,7 +169,7 @@ describe("electron main windows", () => {
 
     main.createWindows();
     const shortcutHandler = electron.globalShortcut.register.mock.calls[0][1];
-    const unifiedWindow = electron.__windows[2];
+    const unifiedWindow = electron.__windows[1];
 
     shortcutHandler();
     expect(unifiedWindow.show).toHaveBeenCalled();
@@ -213,14 +193,9 @@ describe("electron main windows", () => {
     );
   });
 
-  test("bubble position above character uses bottom tail", () => {
-    const { calcBubblePosition } = require("../../electron/main");
-    expect(
-      calcBubblePosition(
-        { x: 300, y: 700, width: 300, height: 400 },
-        { width: 220, height: 90 },
-        { width: 1920, height: 1080 }
-      ).tail
-    ).toBe("bottom");
+  test("snapToEdge clamps windows to screen boundaries", () => {
+    const { snapToEdge } = require("../../electron/main");
+    expect(snapToEdge(10, 10, 300, 500, 1920, 1080)).toEqual({ x: 0, y: 0 });
+    expect(snapToEdge(1700, 700, 300, 500, 1920, 1080)).toEqual({ x: 1620, y: 580 });
   });
 });

@@ -42,7 +42,7 @@ export default function useChat(
     // Read outputMode from Electron store at send time so it reflects the latest saved setting.
     const appSettings = await window.hanaDesktop?.getAppSettings?.() || {};
     const outputMode = appSettings?.voice?.outputMode || OUTPUT_MODES.CHAT;
-    const isVoiceMode = outputMode === OUTPUT_MODES.VOICE || outputMode === OUTPUT_MODES.BUBBLE_VOICE;
+    const isVoiceMode = outputMode === OUTPUT_MODES.VOICE;
 
     const userMessage = {
       role: "user",

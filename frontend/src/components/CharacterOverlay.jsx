@@ -21,14 +21,7 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
   const rendererRef = useRef(null);
   const dragRef = useRef(null);
   const pettingTracker = useMemo(
-    () =>
-      createPettingTracker(() => {
-        window.hanaDesktop?.showBubble?.({
-          message: "기분 좋다~",
-          mood: "HAPPY",
-          type: "talk",
-        });
-      }),
+    () => createPettingTracker(() => {}),
     []
   );
 

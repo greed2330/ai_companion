@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import CharacterOverlay from "./components/CharacterOverlay";
-import BubbleWindow from "./components/bubble/BubbleWindow";
 import CharacterPositionPopup from "./components/settings/CharacterPositionPopup";
 import useMoodStream from "./hooks/useMoodStream";
 import MainWindow from "./pages/MainWindow";
@@ -67,15 +66,10 @@ function CharacterScreen() {
   );
 }
 
-function BubbleScreen() {
-  return <BubbleWindow />;
-}
-
 function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/character" replace />} />
-      <Route path="/bubble" element={<BubbleScreen />} />
       <Route path="/charPosition" element={<CharacterPositionPopup />} />
       <Route path="/character" element={<CharacterScreen />} />
       <Route path="/main" element={<MainWindow />} />

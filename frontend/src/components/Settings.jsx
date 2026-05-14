@@ -38,9 +38,7 @@ const INPUT_MODES = [
 
 const OUTPUT_MODE_OPTIONS = [
   [OUTPUT_MODES.CHAT, "Chat", "Render the full reply in chat"],
-  [OUTPUT_MODES.BUBBLE, "Bubble", "Short overlay bubble"],
   [OUTPUT_MODES.VOICE, "Voice", "TTS only"],
-  [OUTPUT_MODES.BUBBLE_VOICE, "Bubble + Voice", "Bubble with TTS"],
 ];
 
 const THEMES = [
@@ -538,19 +536,6 @@ function Settings({ settingsState }) {
               onChange={() =>
                 updatePending("autonomous", {
                   proactive_chat: !effective.autonomous.proactive_chat,
-                })
-              }
-            />
-          )}
-          {row(
-            "Tip bubbles",
-            "Desktop tips and short comments",
-            <Toggle
-              ariaLabel="tip-bubbles-toggle"
-              checked={effective.autonomous.tip_bubbles}
-              onChange={() =>
-                updatePending("autonomous", {
-                  tip_bubbles: !effective.autonomous.tip_bubbles,
                 })
               }
             />
