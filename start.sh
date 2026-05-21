@@ -17,6 +17,7 @@ fi
 
 # 종료 시 자식 프로세스 전부 정리
 cleanup() {
+  trap - EXIT INT TERM  # 재진입 방지: kill 0 이후 EXIT 시그널로 다시 호출되는 것 막음
   echo ""
   echo "[HANA] 종료 중..."
   kill 0

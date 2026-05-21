@@ -130,7 +130,10 @@ async def build_context(
     try:
         from backend.services.model_context_service import get_current_context
         model_ctx = get_current_context()
-        available_actions = model_ctx.get("available_actions", [])
+        _actions = model_ctx.get("available_actions", {})
+        # 옛날 캐시 파일이 list 형태로 저장된 경우 방어 (dict[str,str]만 허용)
+        if isinstance(_actions, dict):
+            available_actions = _actions
     except Exception as e:
         logger.debug("model_context 조회 실패 (모델 미선택): %s", e)
 

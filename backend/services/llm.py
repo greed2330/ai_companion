@@ -476,9 +476,11 @@ async def stream_chat(
 
                     content = msg.get("content", "")
                     if content:
-                        # <think>…</think> 태그가 content에 노출될 경우 제거
-                        content = _THINK_TAG_PAT.sub("", content).strip()
-                        if content:
+                        # <think>…</think> 태그가 content에 노출될 경우 제거.
+                        # strip()은 빈 토큰 체크에만 쓰고 yield는 공백 포함 원본으로.
+                        # (strip하면 토큰 앞뒤 공백이 날아가 한국어 단어가 붙어버림)
+                        content = _THINK_TAG_PAT.sub("", content)
+                        if content.strip():
                             yield content
 
                     if data.get("done"):

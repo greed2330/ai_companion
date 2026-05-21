@@ -220,9 +220,10 @@ class LLMRouter:
                             if thinking := msg.get("thinking"):
                                 logger.debug("[think] %s", thinking[:100])
                             if c := msg.get("content", ""):
-                                # <think>…</think> 태그가 content에 노출될 경우 제거
-                                c = _think_pat.sub("", c).strip()
-                                if c:
+                                # <think>…</think> 태그가 content에 노출될 경우 제거.
+                                # strip()은 공백 체크에만 쓰고 yield는 공백 포함 원본으로.
+                                c = _think_pat.sub("", c)
+                                if c.strip():
                                     yield c
                             if data.get("done"):
                                 return
