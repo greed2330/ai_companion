@@ -471,6 +471,9 @@ async def run_chat_pipeline(
                         yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
             except Exception as exc:
                 logger.error("/chat LLM error: cid=%s error=%s", cid, exc)
+                # user 메시지 롤백 — assistant reply 없이 남으면 다음 요청 히스토리가 깨짐
+                await db.execute("DELETE FROM messages WHERE id = ?", (user_msg_id,))
+                await db.commit()
                 yield (
                     f"data: {json.dumps({'type': 'error', 'code': 'LLM_UNAVAILABLE', 'message': str(exc)}, ensure_ascii=False)}\n\n"
                 )
