@@ -7,6 +7,7 @@ celery==5.4.0
 redis==5.2.1
 python-dotenv==1.0.1
 mem0ai==0.1.98
+ollama>=0.4.0
 chromadb==0.6.3
 python-multipart==0.0.20
 kokoro==0.9.4
