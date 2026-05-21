@@ -117,7 +117,16 @@ async def _load_recent_messages(
         (conversation_id, limit),
     ) as cursor:
         rows = await cursor.fetchall()
-    return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+    messages = [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+
+    # user→user 연속 턴 제거: 앞의 user를 드롭해 LLM 혼동 방지
+    cleaned: list[dict] = []
+    for msg in messages:
+        if cleaned and cleaned[-1]["role"] == msg["role"] == "user":
+            cleaned[-1] = msg  # 같은 역할 연속이면 최신 것으로 교체
+        else:
+            cleaned.append(msg)
+    return cleaned
 
 
 async def _update_message_mood(message_id: str, mood: str) -> None:
