@@ -124,8 +124,21 @@ async def _fetch_ollama_models() -> list[str]:
 @router.get("/settings/models")
 async def get_character_models() -> dict:
     """사용 가능한 캐릭터 모델 목록(Live2D + PMX)과 현재 선택 모델을 반환한다."""
+    global _current_character_model_id
     models = _scan_models()
     current = _current_character_model_id or (models[0]["id"] if models else None)
+
+    # fallback으로 결정된 모델을 런타임에 고정하고 model_context 초기화.
+    # CharacterOverlay가 화면에 띄우는 모델과 백엔드 model_context를 동기화한다.
+    if current and current != _current_character_model_id:
+        _current_character_model_id = current
+        selected = next((m for m in models if m["id"] == current), None)
+        if selected:
+            try:
+                await on_model_changed(selected["id"], selected["path"], selected["type"])
+            except Exception as e:
+                logger.warning("model_context auto-init failed: %s", e)
+
     logger.info(f"/settings/models scanned: {len(models)} models found, current={current}")
     return {"models": models, "current": current}
 
