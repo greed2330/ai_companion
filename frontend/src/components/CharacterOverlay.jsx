@@ -61,6 +61,7 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
         rendererRef.current = instance;
         if (instance) {
           await characterController.init(instance, modelId);
+          if (import.meta.env.DEV) window.__cc = characterController; // 모션 테스트용
           syncViewport(instance, viewport);
         }
         setHasRenderableModel(Boolean(instance));
@@ -146,6 +147,12 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
         if (!characterController._motionActive) {
           characterController.setAbstractParam("mouth_open", event.data.value ?? 0);
         }
+        return;
+      }
+
+      if (type === "inline_actions") {
+        // MainWindow에서 BroadcastChannel로 전달된 [action:] 태그 처리
+        characterController.playInlineActions(event.data.actions ?? []).catch(() => {});
         return;
       }
 

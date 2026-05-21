@@ -146,9 +146,10 @@ export default function useChat(
               }
               onMessagePersisted?.();
               setIsStreaming(false);
-              // 인라인 액션 모션 큐 실행 (비동기, UI 블로킹 없음)
+              // 인라인 액션 모션 큐 실행 — CharacterWindow로 BroadcastChannel 전달
+              // (MainWindow의 characterController는 미초기화 상태이므로 직접 호출 불가)
               if (actions.length) {
-                characterController.playInlineActions(actions).catch(() => {});
+                new BroadcastChannel("hana-overlay").postMessage({ type: "inline_actions", actions });
               }
               if (isVoiceMode && cleanContent) {
                 ttsService.speak(cleanContent).catch(() => {});
