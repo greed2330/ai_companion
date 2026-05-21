@@ -103,9 +103,12 @@ async def add_memory(
     mem0 = _get_mem0()
 
     result = mem0.add(message, user_id=user_id)
-    # mem0 응답 형식: {"results": [{"id": "...", "memory": "...", "event": "ADD"|"UPDATE"|"NONE"}]}
+    # mem0 버전별 반환 형태 정규화 (search와 동일)
+    result_list: list = result.get("results", []) if isinstance(result, dict) else (result or [])
     facts = []
-    for r in result.get("results", []):
+    for r in result_list:
+        if not isinstance(r, dict):
+            continue
         if r.get("event") not in ("ADD", "UPDATE"):
             continue
         mem0_id = r.get("id", "")
@@ -139,9 +142,12 @@ async def search_memory(
         return []
 
     # limit * 2로 넉넉하게 가져와서 confidence 필터 후 자름
-    raw_results = mem0.search(query, user_id=user_id, limit=limit * 2)
+    raw = mem0.search(query, user_id=user_id, limit=limit * 2)
+    # mem0 버전별 반환 형태 정규화:
+    # v0.1.x → list[dict]  /  v0.1.98+ → {"results": list[dict], ...}
+    raw_results: list = raw.get("results", []) if isinstance(raw, dict) else (raw or [])
 
-    mem0_ids = [r.get("id") for r in raw_results if r.get("id")]
+    mem0_ids = [r.get("id") for r in raw_results if isinstance(r, dict) and r.get("id")]
     if not mem0_ids:
         return []
 
