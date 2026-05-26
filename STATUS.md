@@ -542,6 +542,251 @@ audio.onplay = () => {
 
 ---
 
+### [SPEC-14] 립싱크 음절 단위 개선 — 텍스트 기반 비젬(viseme) 타임라인 ⬜ 미시작
+
+> 기획일: 2026-05-26
+
+#### 문제 (현재 구조의 한계)
+
+**현재 파이프라인:**
+```
+TTS 오디오 재생
+  → AnalyserNode fftSize=256
+  → frequencyData bins 3~30 → 평균 / 64 → value 0~1
+  → BroadcastChannel("hana-overlay") → ParamMouthOpenY
+```
+
+**증상:** 한 문장 동안 입이 쭉 벌어져 있음. 음절마다 뻐끔뻐끔이 없음.
+
+**원인:** 주파수 평균값은 발화 시 거의 항상 높게 유지됨. 음절 경계를 감지하지 못함.
+단순 진폭 분석으로는 "지금 어떤 모음을 발음하는지" 알 수 없음.
+
+---
+
+#### 해결 방향 — 텍스트 기반 비젬 타임라인
+
+TTS 호출 시 텍스트가 이미 있음. 오디오 분석에 의존하지 않고,
+텍스트에서 음절을 분해 → 모음별 입 열림값 매핑 → 재생 시간 기반 스케줄 실행.
+
+```
+TTS.speak(text) 호출
+  ↓
+viseme.buildVisemeSchedule(text, durationMs)
+  → 한국어 음절 분해 (초성/중성/종성)
+  → 중성(모음) → 입 열림값(0~1) 룩업
+  → 음절별 타임스탬프 계산 (durationMs / 음절 수)
+  → frames: [{ timeMs, openValue }, ...]
+  ↓
+lipsync.startWithText(audio, text)
+  → audio.duration 확인 후 스케줄 시작
+  → rAF 루프: audio.currentTime → 현재 프레임 인덱스 → 인접 프레임 보간
+  → BroadcastChannel → ParamMouthOpenY
+```
+
+오디오 분석(AnalyserNode)은 **텍스트가 없는 경우의 fallback**으로만 유지.
+
+---
+
+#### 한국어 모음 → 입 열림값 매핑
+
+```
+ㅏ, ㅑ     → 0.90  (가장 넓게 벌림)
+ㅓ, ㅕ     → 0.80
+ㅐ, ㅒ     → 0.75
+ㅔ, ㅖ     → 0.65
+ㅗ, ㅛ     → 0.55  (동그랗게 모음, 수직 개방도 중간)
+ㅘ, ㅙ     → 0.70
+ㅜ, ㅠ     → 0.50
+ㅝ, ㅞ     → 0.58
+ㅚ, ㅟ     → 0.45
+ㅡ, ㅢ     → 0.30  (납작하게, 거의 안 열림)
+ㅣ         → 0.38
+```
+
+**음절 내부 타이밍 (1음절 = 100%):**
+```
+0%  ~ 15%  : 초성 발음 → 입 거의 닫힘 (0.05)
+15% ~ 20%  : 모음 진입 → 열리기 시작
+20% ~ 75%  : 모음 피크 → 위 매핑값 유지
+75% ~ 90%  : 받침(종성) 있으면 닫힘 시작 (0.05), 없으면 약간 열림 유지 (0.1)
+90% ~ 100% : 다음 초성 준비 → 닫힘
+```
+
+---
+
+#### 구현 명세
+
+##### 신규 파일: `frontend/src/services/viseme.js`
+
+역할: 순수 함수. 텍스트 → 비젬 프레임 배열 변환.
+
+```javascript
+// 유니코드 한국어 음절 분해 (AC00~D7A3)
+// code = char - 0xAC00
+// 초성 index = Math.floor(code / 28 / 21)  → 19종
+// 중성 index = Math.floor((code / 28) % 21) → 21종
+// 종성 index = code % 28                    → 28종 (0 = 없음)
+
+export function buildVisemeSchedule(text, durationMs) {
+  // 1. 한국어 음절만 추출 (공백/구두점은 묵음 처리)
+  // 2. 음절 수 기준으로 msPerSyllable 계산
+  // 3. 각 음절마다 4개 keyframe 생성:
+  //    { timeMs: t,          openValue: 0.05 }  초성
+  //    { timeMs: t + 20%,    openValue: peak }   모음 피크
+  //    { timeMs: t + 75%,    openValue: 0.05~0.1 } 종성
+  //    (마지막 음절 후 { timeMs: durationMs, openValue: 0 })
+  // 반환: [{ timeMs: number, openValue: number }, ...]
+}
+```
+
+의존성: 없음. 외부 라이브러리 불필요 (유니코드 산술만으로 분해 가능).
+
+##### 수정 파일: `frontend/src/services/lipsync.js`
+
+추가할 메서드:
+
+```javascript
+// 텍스트 기반 립싱크 (메인 경로)
+startWithText(audio, text) {
+  this._stop();
+  
+  const begin = () => {
+    const durationMs = (audio.duration || 3) * 1000;
+    this._schedule = buildVisemeSchedule(text, durationMs);
+    this._runSchedule(audio);
+  };
+  
+  if (audio?.duration > 0) {
+    begin();
+  } else if (audio) {
+    audio.addEventListener("canplay", begin, { once: true });
+    // canplay 지연 시 amplitude fallback 병행 (override됨)
+    this.start(audio);
+  } else {
+    this._dummy();  // SpeechSynthesis 경로
+  }
+}
+
+// rAF 루프 — audio.currentTime 기반 프레임 보간
+_runSchedule(audio) {
+  let frameIdx = 0;
+  const schedule = this._schedule;
+  const channel = new BroadcastChannel("hana-overlay");
+  
+  const tick = () => {
+    if (!audio || audio.ended) {
+      channel.postMessage({ type: "lipsync_value", value: 0 });
+      return;
+    }
+    const currentMs = audio.currentTime * 1000;
+    
+    // 현재 시간 이후의 첫 프레임으로 포인터 전진
+    while (frameIdx < schedule.length - 1 && schedule[frameIdx + 1].timeMs <= currentMs) {
+      frameIdx++;
+    }
+    
+    const curr = schedule[frameIdx];
+    const next = schedule[frameIdx + 1];
+    let value = curr.openValue;
+    
+    if (next) {
+      const t = (currentMs - curr.timeMs) / (next.timeMs - curr.timeMs);
+      value = curr.openValue + (next.openValue - curr.openValue) * Math.min(1, t);
+    }
+    
+    channel.postMessage({ type: "lipsync_value", value: Math.max(0, Math.min(1, value)) });
+    this._raf = requestAnimationFrame(tick);
+  };
+  
+  this._raf = requestAnimationFrame(tick);
+}
+```
+
+기존 `start(audio)` (amplitude 기반): **그대로 유지** (fallback 경로).
+
+##### 수정 파일: `frontend/src/services/tts.js`
+
+`_playBlob(blob)` → `_playBlob(blob, text)` 로 시그니처 변경.
+`tts-start` 이벤트에 `text` 추가:
+
+```javascript
+// 변경 전
+audio.onplay = () => {
+  window.dispatchEvent(new CustomEvent("tts-start", { detail: { audio } }));
+};
+
+// 변경 후
+audio.onplay = () => {
+  window.dispatchEvent(new CustomEvent("tts-start", { detail: { audio, text } }));
+};
+```
+
+`speak(text)` → `_playBlob(blob, text)` 로 text 전달 라인 추가.
+
+##### 수정 파일: `frontend/src/hooks/useChat.js` (lipsync.js 리스너 부분)
+
+`useChat.js`에 있는 lipsync import는 변경 없음.
+단, `lipsync.js` 내부 tts-start 핸들러만 수정:
+
+```javascript
+// lipsync.js 안에서
+window.addEventListener("tts-start", (event) => {
+  const { audio, text } = event.detail || {};
+  if (text && text.trim()) {
+    lipSyncService.startWithText(audio, text);
+  } else {
+    lipSyncService.start(audio);  // fallback
+  }
+});
+```
+
+---
+
+#### 선택적 확장 — 입 모양(rounding) 파라미터
+
+현재는 입 열림(Y축)만 제어. 추후 `ParamMouthForm`으로 입술 모양도 제어 가능.
+
+```
+ㅗ/ㅜ/ㅛ/ㅠ/ㅘ/ㅝ → mouth_round = 0.8  (입술 동그랗게)
+ㅏ/ㅐ/ㅓ/ㅔ       → mouth_round = 0.1  (입술 옆으로 넓게)
+ㅡ/ㅣ             → mouth_round = 0.05 (납작하게)
+```
+
+`characterController._defaultMapping()`에 `mouth_round → ParamMouthForm` 추가.
+현재 단계에선 구현 안 함 — 입 열림 개선이 먼저.
+
+---
+
+#### 타이밍 정확도 한계 및 보완
+
+| 상황 | 문제 | 대응 |
+|------|------|------|
+| 문장 앞 침묵(TTS 인트로) | 오디오 시작 ~ 실제 발화 사이 딜레이 | audio.duration에서 실제 내용 시작 추정 어려움 → 첫 음절 앞에 100ms 여백 추가 |
+| 말이 빠른/느린 경우 | ms/음절 추정치와 실제 발화 속도 불일치 | 향후 TTS 엔진에서 phoneme timing 데이터 제공 시 교체 |
+| 영어/숫자 혼용 | 음절 분해 불가 | 각 글자를 0.4 고정값으로 처리 |
+| 비어있는 텍스트 | buildVisemeSchedule 빈 배열 반환 | amplitude fallback으로 자동 전환 |
+
+---
+
+#### 작업 순서
+
+```
+1. viseme.js 작성 + 단위 테스트 (buildVisemeSchedule 순수 함수 검증)
+2. lipsync.js: startWithText(), _runSchedule() 추가
+3. tts.js: _playBlob(blob, text) 시그니처 + tts-start 이벤트에 text 포함
+4. lipsync.js: tts-start 핸들러에서 text 있으면 startWithText 사용
+5. 로컬 검증: TTS 재생 시 콘솔에서 lipsync_value 변화 확인 (DevTools)
+6. 시각 검증: 캐릭터 입이 음절마다 뻐끔뻐끔 하는지 확인
+```
+
+#### 완료 기준
+- 음절 구분이 있는 문장(예: "오늘 날씨 어때?") 재생 시 입이 5번 열리고 닫힘
+- 현재처럼 한 호흡 동안 쭉 벌어져 있지 않음
+- 텍스트 없는 경우(SpeechSynthesis fallback) 기존 사인파 시뮬레이션 정상 동작
+- 기존 테스트 전부 통과 (amplitude 경로 그대로 유지)
+
+---
+
 ### [SPEC-11] Live2D 모션 시스템 🔵 Phase A 완료
 
 > 📄 **상세 설계 문서 → [SPEC11_LIVE2D_MOTION.md](SPEC11_LIVE2D_MOTION.md)**
