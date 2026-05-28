@@ -357,15 +357,34 @@ def build_system_prompt(
         actions_lines = "\n".join(
             f"  [action:{k}] — {v}" for k, v in available_actions.items()
         )
+        # 예시 문장을 available_actions에서 동적으로 뽑아 구성
+        # 하드코딩 금지 — 모델이 바뀌어도 예시가 실제 사용 가능한 액션만 참조하도록
+        keys = list(available_actions.keys())
+        ex_a = f"[action:{keys[0]}]" if len(keys) > 0 else ""
+        ex_b = f"[action:{keys[1]}]" if len(keys) > 1 else ""
+        examples_line = (
+            f'  "아 그렇구나 {ex_a} 알겠어." / "잠깐, 그게 진짜야? {ex_b} 더 얘기해봐."'
+            if ex_a and ex_b else
+            f'  "아 그렇구나 {ex_a} 알겠어."' if ex_a else ""
+        )
         prompt += f"""
 
-## 인라인 액션 태그
-응답 텍스트 안에 아래 태그를 자연스럽게 삽입하면 캐릭터 모션이 동기화돼.
+## 표정과 몸짓
+넌 텍스트로만 대화하지 않아. 표정과 몸짓도 가지고 있어.
+감정이 자연스럽게 드러나는 순간에 아래 태그를 응답 안에 넣으면, 그게 실제 캐릭터 모션으로 나타나.
 
+사용 가능한 태그:
 {actions_lines}
 
-예시: "음 모르겠는데? [action:갸웃하기] 그래도 괜찮을 것 같아 [action:끄덕이기]"
-규칙: 텍스트 흐름에 자연스럽게. 1개 응답에 0~2개. 어울리지 않으면 쓰지 마."""
+예시 (참고용 — 아래 태그 이름은 위 목록에 있을 때만 써):
+{examples_line}
+  "그냥 밥 먹었어." ← 평온한 상황, 태그 없음
+
+규칙:
+- 감정이나 반응이 자연스럽게 드러나는 순간에만 사용.
+- 1응답에 최대 2개. 붙여쓰지 말고 앞뒤에 텍스트 둬.
+- 위 목록에 없는 태그는 절대 쓰지 마.
+- 평온하거나 밋밋한 대화에선 안 써도 됨."""
 
     return prompt
 
