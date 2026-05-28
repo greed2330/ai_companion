@@ -1,13 +1,18 @@
 /**
  * LipSyncService
  *
- * TTS 오디오를 분석해서 mouth_open 값(0~1)을 계산하고,
- * BroadcastChannel("hana-overlay")로 캐릭터 창에 전달한다.
+ * TTS 재생 중 mouth_open 값(0~1)을 계산해 BroadcastChannel("hana-overlay")로 전달한다.
+ * CharacterOverlay.jsx가 lipsync_value 메시지를 받아 ParamMouthOpenY에 반영한다.
  *
- * 캐릭터 오버레이가 별도 BrowserWindow이기 때문에
- * window.__characterRenderer 직접 호출은 불가능하다.
- * CharacterOverlay.jsx가 lipsync_value 메시지를 받아서 처리한다.
+ * 메인 경로 — startWithText(audio, text):
+ *   viseme.js가 반환한 [{timeMs, openValue}] 타임라인을 audio.currentTime으로 추종한다.
+ *   타이밍 전략 교체는 viseme.js에서만 이루어지고 이 파일은 변경 불필요.
+ *
+ * Fallback 경로 — start(audio):
+ *   오디오 주파수 진폭 분석. SpeechSynthesis 에러 시 사인파 시뮬레이션.
  */
+
+import { buildVisemeSchedule } from "./viseme";
 
 const _channel = new BroadcastChannel("hana-overlay");
 
@@ -16,8 +21,68 @@ export class LipSyncService {
     this.analyzer = null;
     this.frame = null;
     this.ctx = null;
+    this._schedule = null;
   }
 
+  // 텍스트 기반 립싱크 (메인 경로)
+  startWithText(audio, text) {
+    this.stop();
+
+    if (!audio) {
+      this._dummy();
+      return;
+    }
+
+    const durationMs = (audio.duration > 0 ? audio.duration : 3) * 1000;
+    this._schedule = buildVisemeSchedule(text, durationMs);
+
+    if (!this._schedule.length) {
+      // 발음 가능한 음절 없음 → amplitude fallback
+      this.start(audio);
+      return;
+    }
+
+    this._runSchedule(audio);
+  }
+
+  // viseme 타임라인 추종 rAF 루프
+  _runSchedule(audio) {
+    let frameIdx = 0;
+    const schedule = this._schedule;
+
+    const tick = () => {
+      if (!audio || audio.ended) {
+        _channel.postMessage({ type: "lipsync_value", value: 0 });
+        this.frame = null;
+        return;
+      }
+
+      const currentMs = audio.currentTime * 1000;
+
+      while (frameIdx < schedule.length - 1 && schedule[frameIdx + 1].timeMs <= currentMs) {
+        frameIdx++;
+      }
+
+      const curr = schedule[frameIdx];
+      const next = schedule[frameIdx + 1];
+      let value = curr.openValue;
+
+      if (next) {
+        const span = next.timeMs - curr.timeMs;
+        if (span > 0) {
+          const t = Math.min(1, Math.max(0, (currentMs - curr.timeMs) / span));
+          value = curr.openValue + (next.openValue - curr.openValue) * t;
+        }
+      }
+
+      _channel.postMessage({ type: "lipsync_value", value: Math.max(0, Math.min(1, value)) });
+      this.frame = requestAnimationFrame(tick);
+    };
+
+    this.frame = requestAnimationFrame(tick);
+  }
+
+  // 진폭 분석 기반 립싱크 (amplitude fallback 경로)
   start(audio) {
     this.stop();
 
@@ -44,7 +109,6 @@ export class LipSyncService {
       let sum = 0;
       for (let i = 0; i < slice.length; i++) sum += slice[i];
       const average = sum / slice.length;
-      // 0~255 → 0~1. 실제 음성은 average가 보통 10~60 사이이므로 64로 나눠 감도 높임
       const value = Math.min(1, average / 64);
       _channel.postMessage({ type: "lipsync_value", value });
       this.frame = requestAnimationFrame(tick);
@@ -53,7 +117,7 @@ export class LipSyncService {
   }
 
   _dummy() {
-    // Fallback (SpeechSynthesis 사용 시): 사인파로 입 움직임 시뮬레이션
+    // SpeechSynthesis 에러 경로: 사인파로 입 움직임 시뮬레이션
     let time = 0;
     const tick = () => {
       const value = Math.abs(Math.sin(time * 8)) * 0.6;
@@ -72,6 +136,7 @@ export class LipSyncService {
     this.ctx?.close?.();
     this.ctx = null;
     this.analyzer = null;
+    this._schedule = null;
     _channel.postMessage({ type: "lipsync_value", value: 0 });
   }
 }
@@ -79,7 +144,12 @@ export class LipSyncService {
 export const lipSyncService = new LipSyncService();
 
 window.addEventListener("tts-start", (event) => {
-  lipSyncService.start(event.detail?.audio);
+  const { audio, text } = event.detail || {};
+  if (text && text.trim()) {
+    lipSyncService.startWithText(audio, text);
+  } else {
+    lipSyncService.start(audio);
+  }
 });
 
 window.addEventListener("tts-end", () => {

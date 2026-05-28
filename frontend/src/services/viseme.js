@@ -1,7 +1,14 @@
 /**
  * 한국어 텍스트 → viseme 프레임 배열 변환.
- * 오디오 분석 없이 유니코드 산술로 음절을 분해하고,
- * 중성(모음)별 입 열림값을 시간축에 배치한다.
+ * 유니코드 산술로 음절을 분해하고, 중성(모음)별 입 열림값을 시간축에 배치한다.
+ *
+ * 타이밍 전략은 이 파일에서만 결정된다. 현재는 균등 분배(uniform):
+ *   음절당 시간 = 오디오 총 길이 ÷ 음절 수
+ *
+ * 향후 더 정확한 타이밍이 필요하면 이 파일에 새 함수를 추가하고 교체한다:
+ *   buildVisemeScheduleFromOnsets(text, onsetTimesMs)   — 오디오 onset 감지 기반
+ *   buildVisemeScheduleFromWhisper(text, whisperWords)  — Whisper 정렬 기반
+ * lipsync.js는 [{timeMs, openValue}] 배열만 받으므로 교체해도 영향 없음.
  */
 
 // 중성(jungseong) 인덱스 0~20 순서: ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ
@@ -43,7 +50,7 @@ function _decomposeKorean(char) {
  * 각 프레임: { timeMs: number, openValue: number (0~1) }
  * 프레임은 timeMs 오름차순으로 정렬되어 있다.
  *
- * 빈 배열을 반환하면 amplitude fallback으로 처리해야 한다.
+ * 빈 배열 반환 → 발음 가능한 음절이 없음 → 호출 측에서 _dummy() 처리.
  */
 export function buildVisemeSchedule(text, durationMs) {
   const syllables = [];
