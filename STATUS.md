@@ -542,80 +542,43 @@ audio.onplay = () => {
 
 ---
 
-### [SPEC-14] 립싱크 음절 단위 개선 — viseme + amplitude 하이브리드 ⬜ 미시작
+### [SPEC-14] 립싱크 음절 단위 개선 — 텍스트 기반 viseme 타임라인 ⬜ 미시작
 
 > 기획일: 2026-05-26 / 아키텍처 확정: 2026-05-28
 
 #### 목표
 
-음성과 캐릭터 입모양의 **디테일한 싱크**. 단순히 입이 열리고 닫히는 게 아니라,
-각 음절마다 뻐끔거리는 리듬이 보여야 하고, 강하게/약하게 말하는 강약 변화도 반영되어야 함.
+음성과 캐릭터 입모양의 디테일한 싱크. 음절마다 입이 열리고 닫히는 리듬이 보여야 함.
 
 ---
 
 #### 문제 (현재 구조의 한계)
 
-**현재 파이프라인:**
-```
-TTS 오디오 재생
-  → AnalyserNode fftSize=256
-  → frequencyData bins 3~30 → 평균 / 64 → value 0~1
-  → BroadcastChannel("hana-overlay") → ParamMouthOpenY
-```
-
-**증상:** 한 문장 동안 입이 쭉 벌어져 있음. 음절마다 뻐끔뻐끔이 없음.
-
-**원인:** 주파수 평균값은 발화 시 거의 항상 높게 유지됨. 음절 경계를 감지하지 못함.
-단순 진폭 분석으로는 "지금 어떤 음절을 발음하는지" 알 수 없음.
+현재는 오디오 재생 중 실시간으로 소리 크기만 측정해서 입 열림값을 계산함.
+소리 크기는 발화 중에 거의 항상 높게 유지되기 때문에 문장 내내 입이 쭉 벌어져 있음.
 
 ---
 
-#### 해결 방향 — viseme(주) + amplitude(보조) 하이브리드
+#### 해결 방향
 
-두 신호를 동시에 사용해 각각의 장점을 취한다.
-
-| 신호 | 역할 | 가중치 |
-|------|------|--------|
-| **viseme 타임라인** | 음절 리듬 — 언제 입이 열리고 닫히는지 | 70% |
-| **amplitude 분석** | 강약 변화 — 같은 음절이라도 세게/약하게 말할 때 차이 반영 | 30% |
+TTS는 항상 LLM 응답 텍스트를 읽는 구조라 텍스트가 반드시 존재함.
+오디오 재생 시작 신호에 텍스트를 포함시켜서, 립싱크 시스템이 그 텍스트로
+음절별 타임라인을 미리 계산하고 재생 중에 따라가도록 한다.
 
 ```
-최종값 = viseme_value * 0.7 + amplitude_value * 0.3
-```
-
-**왜 둘 다 필요한가:**
-- viseme만 쓰면: 음절 리듬은 정확하지만 강약 변화가 없어서 기계적으로 보임
-- amplitude만 쓰면: 자연스럽지만 음절 경계를 못 잡아서 입이 내내 벌어져 있음
-- 둘을 섞으면: 리듬은 viseme이 잡고, 그 안에서 자연스러운 강약은 amplitude가 더해줌
-
-**텍스트가 없을 때:** amplitude만 사용 (현재 동작 그대로).
-
----
-
-#### 전체 파이프라인 (확정)
-
-```
-TTS.speak(text) 호출
+TTS 재생 시작 신호 전달 시 → { audio, text } 함께 전달
   ↓
-_playBlob(blob, text, params)
-  → tts-start 이벤트 발화: { audio, text, params }
+립싱크: 텍스트 음절 분해
+  → 한국어 음절별 모음 → 입 열림값(0~1) 매핑
+  → 오디오 총 길이 ÷ 음절 수 = 음절당 ms 추정
+  → 음절별 keyframe 배열 생성 (timeMs, openValue)
   ↓
-lipsync.js tts-start 핸들러
-  → text 있음 → startWithText(audio, text)
-  → text 없음 → start(audio) [amplitude only]
-  ↓
-startWithText(audio, text):
-  1. buildVisemeSchedule(text, durationMs)
-     → 한국어 음절 분해 (유니코드 산술)
-     → 중성(모음)별 입 열림값 룩업
-     → 음절별 keyframe 배열 생성
-  2. AudioContext + AnalyserNode 설정 (amplitude 신호용)
-  3. 단일 rAF 루프 실행:
-     → viseme: audio.currentTime → 현재 프레임 보간 → viseme_value
-     → amplitude: frequencyData → 평균 → amplitude_value
-     → final = viseme_value * 0.7 + amplitude_value * 0.3
-     → BroadcastChannel("hana-overlay") → ParamMouthOpenY
+오디오 재생 중: audio.currentTime을 보면서 타임라인 따라가기
+  → 현재 위치의 프레임 보간 → 입 열림값 결정
+  → 캐릭터 창에 전달 → ParamMouthOpenY
 ```
+
+SpeechSynthesis 에러 fallback: 기존 사인파 시뮬레이션 유지.
 
 ---
 
@@ -624,25 +587,25 @@ startWithText(audio, text):
 중성(jungseong) 인덱스 0~20 순서: ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ
 
 ```
-ㅏ(0), ㅑ(2)       → 0.90  (가장 넓게 벌림)
+ㅏ(0), ㅑ(2)       → 0.90
 ㅐ(1), ㅒ(3)       → 0.75
 ㅓ(4), ㅕ(6)       → 0.80
 ㅔ(5), ㅖ(7)       → 0.65
-ㅗ(8), ㅛ(12)      → 0.55  (동그랗게, 수직 개방도 중간)
+ㅗ(8), ㅛ(12)      → 0.55
 ㅘ(9), ㅙ(10)      → 0.70
 ㅜ(13), ㅠ(17)     → 0.50
 ㅝ(14), ㅞ(15)     → 0.58
 ㅚ(11), ㅟ(16)     → 0.45
-ㅡ(18), ㅢ(19)     → 0.30  (납작하게, 거의 안 열림)
+ㅡ(18), ㅢ(19)     → 0.30
 ㅣ(20)             → 0.38
-영어/숫자           → 0.40  (고정값)
+영어/숫자           → 0.40 (고정값)
 ```
 
 **음절 내부 타이밍 (1음절 = 100%):**
 ```
-0%  ~ 20%  : 초성 → 입 거의 닫힘 (0.05)
+0%  ~ 20%  : 초성 → 거의 닫힘 (0.05)
 20% ~ 75%  : 모음 피크 → 위 매핑값
-75% ~ 90%  : 종성 있으면 닫힘 (0.05), 없으면 약간 열림 유지 (0.10)
+75% ~ 90%  : 종성 있으면 닫힘 (0.05), 없으면 약간 열림 (0.10)
 90% ~ 100% : 다음 초성 준비 → 닫힘 (0)
 ```
 
@@ -650,170 +613,43 @@ startWithText(audio, text):
 
 #### 구현 명세
 
-##### 신규 파일: `frontend/src/services/viseme.js`
+**수정이 필요한 파일 3개 + 신규 파일 1개:**
 
-순수 함수. 외부 의존성 없음. 유니코드 산술로 한국어 음절 분해.
+1. **`tts.js`**: 오디오 재생 시작 신호에 text 포함. 현재는 audio만 전달하고 텍스트는 소실됨.
 
-```javascript
-// 유니코드 한국어 음절 분해 공식
-// code = char.charCodeAt(0) - 0xAC00  (AC00~D7A3 범위)
-// 중성 index = Math.floor((code / 28) % 21)
-// 종성 유무  = (code % 28) !== 0
+2. **`viseme.js`** (신규, 이미 작성됨): 텍스트 → keyframe 배열 변환 순수 함수. 외부 의존성 없음.
 
-export function buildVisemeSchedule(text, durationMs)
-// 반환: [{ timeMs: number, openValue: number }, ...]
-// 한국어+영어 음절 없으면 [] 반환 → amplitude fallback 신호
-```
-
-##### 수정 파일: `frontend/src/services/lipsync.js`
-
-추가할 메서드 2개:
-
-```javascript
-// 텍스트 기반 립싱크 (메인 경로) — viseme + amplitude 블렌딩
-startWithText(audio, text) {
-  this.stop();
-  if (!audio) { this._dummy(); return; }
-
-  const durationMs = (audio.duration > 0 ? audio.duration : 3) * 1000;
-  this._schedule = buildVisemeSchedule(text, durationMs);
-
-  if (!this._schedule.length) {
-    this.start(audio);  // 음절 없음 → amplitude only
-    return;
-  }
-
-  // AudioContext 설정 (amplitude 신호 추출용)
-  this.ctx = new AudioContext();
-  const src = this.ctx.createMediaElementSource(audio);
-  this.analyzer = this.ctx.createAnalyser();
-  this.analyzer.fftSize = 256;
-  src.connect(this.analyzer);
-  this.analyzer.connect(this.ctx.destination);
-
-  this._runHybrid(audio);
-}
-
-// 단일 rAF 루프 — viseme 70% + amplitude 30%
-_runHybrid(audio) {
-  let frameIdx = 0;
-  const schedule = this._schedule;
-  const freqData = new Uint8Array(this.analyzer.frequencyBinCount);
-
-  const tick = () => {
-    if (!audio || audio.ended) {
-      _channel.postMessage({ type: "lipsync_value", value: 0 });
-      this.frame = null;
-      return;
-    }
-
-    // viseme 값 계산
-    const currentMs = audio.currentTime * 1000;
-    while (frameIdx < schedule.length - 1 && schedule[frameIdx + 1].timeMs <= currentMs) {
-      frameIdx++;
-    }
-    const curr = schedule[frameIdx];
-    const next = schedule[frameIdx + 1];
-    let visemeValue = curr.openValue;
-    if (next) {
-      const span = next.timeMs - curr.timeMs;
-      if (span > 0) {
-        const t = Math.min(1, Math.max(0, (currentMs - curr.timeMs) / span));
-        visemeValue = curr.openValue + (next.openValue - curr.openValue) * t;
-      }
-    }
-
-    // amplitude 값 계산
-    this.analyzer.getByteFrequencyData(freqData);
-    const slice = freqData.subarray(3, 30);
-    let sum = 0;
-    for (let i = 0; i < slice.length; i++) sum += slice[i];
-    const amplitudeValue = Math.min(1, (sum / slice.length) / 64);
-
-    // 블렌딩
-    const value = Math.min(1, visemeValue * 0.7 + amplitudeValue * 0.3);
-    _channel.postMessage({ type: "lipsync_value", value });
-    this.frame = requestAnimationFrame(tick);
-  };
-
-  this.frame = requestAnimationFrame(tick);
-}
-```
-
-기존 `start(audio)` (amplitude 전용): **그대로 유지** (텍스트 없을 때 fallback).
-
-##### 수정 파일: `frontend/src/services/tts.js`
-
-```javascript
-// _playBlob 시그니처 변경
-async _playBlob(blob, text, params = {})
-
-// tts-start 이벤트에 text 포함
-audio.onplay = () => {
-  window.dispatchEvent(new CustomEvent("tts-start", { detail: { audio, text, params } }));
-};
-
-// speak()에서 text 전달
-await this._playBlob(await response.blob(), text, params);
-```
-
-##### 수정 파일: `frontend/src/services/lipsync.js` (tts-start 핸들러)
-
-```javascript
-window.addEventListener("tts-start", (event) => {
-  const { audio, text } = event.detail || {};
-  if (text && text.trim()) {
-    lipSyncService.startWithText(audio, text);  // 하이브리드
-  } else {
-    lipSyncService.start(audio);                // amplitude only
-  }
-});
-```
+3. **`lipsync.js`**: tts-start 핸들러에서 text를 받아 타임라인 계산 후 실행. 기존 소리크기 분석 루프 대신 타임라인 추종 루프로 교체. SpeechSynthesis 에러 경로(audio=null)는 기존 사인파 유지.
 
 ---
 
-#### 선택적 확장 — 입 모양(rounding) 파라미터
+#### 한계 (솔직하게)
 
-현재는 입 열림(Y축)만 제어. 추후 `ParamMouthForm`으로 입술 모양도 제어 가능.
+이 방식의 근본적인 한계는 **타이밍 추정**이다.
+`오디오 총 길이 ÷ 음절 수`로 음절당 시간을 균등 분배하는데,
+실제 TTS 발화는 음절마다 길이가 다름. "안녕하세요"의 "안"과 "요"가 같은 길이가 아님.
 
-```
-ㅗ/ㅜ/ㅛ/ㅠ/ㅘ/ㅝ → mouth_round = 0.8  (입술 동그랗게)
-ㅏ/ㅐ/ㅓ/ㅔ       → mouth_round = 0.1  (입술 옆으로 넓게)
-ㅡ/ㅣ             → mouth_round = 0.05 (납작하게)
-```
+짧은 응답(1~2문장): 타이밍 오차가 누적될 겨를이 없어서 자연스럽게 보임.
+긴 응답(5문장 이상): 뒤로 갈수록 viseme와 실제 발화가 어긋날 수 있음.
 
-`characterController._defaultMapping()`에 `mouth_round → ParamMouthForm` 추가.
-현재 단계에선 구현 안 함 — 입 열림 개선이 먼저.
-
----
-
-#### 타이밍 정확도 한계 및 보완
-
-| 상황 | 문제 | 대응 |
-|------|------|------|
-| 문장 앞 침묵(TTS 인트로) | 오디오 시작 ~ 실제 발화 사이 딜레이 | 첫 음절 앞에 100ms 여백 추가 |
-| 말이 빠른/느린 경우 | ms/음절 추정치와 실제 발화 속도 불일치 | 향후 TTS 엔진이 phoneme timing 제공하면 교체 |
-| 영어/숫자 혼용 | 음절 분해 불가 | 글자당 0.4 고정값으로 처리 |
-| 비어있는 텍스트 | buildVisemeSchedule 빈 배열 반환 | amplitude only로 자동 전환 |
+정확한 타이밍은 TTS 엔진이 음절별 타임스탬프를 제공해야 가능함.
+Kokoro가 일부 지원하므로 추후 교체 가능한 구조로 설계.
 
 ---
 
 #### 작업 순서
 
 ```
-1. viseme.js 작성 + 단위 테스트 (buildVisemeSchedule 순수 함수 검증)
-2. lipsync.js: startWithText(), _runHybrid() 추가 + tts-start 핸들러 수정
-3. tts.js: _playBlob(blob, text, params) 시그니처 + tts-start에 text 포함
-4. 기존 테스트 통과 확인 + 신규 테스트 추가
-5. 로컬 검증: DevTools에서 lipsync_value 값 변화 확인 (음절마다 오르내리는지)
-6. 시각 검증: 캐릭터 입이 음절마다 뻐끔뻐끔하는지 확인
+1. tts.js: 재생 시작 신호에 text 포함
+2. lipsync.js: text 받아서 타임라인 계산 + 재생 중 따라가기 구현
+3. 테스트 추가 (viseme.js 순수함수 단위 테스트)
+4. DevTools 콘솔에서 lipsync_value 값이 음절마다 오르내리는지 확인
+5. 시각 검증: 캐릭터 입이 뻐끔뻐끔하는지 확인
 ```
 
 #### 완료 기준
-- 음절이 있는 문장(예: "오늘 날씨 어때?") 재생 시 입이 5번 열리고 닫힘
-- 한 호흡 동안 입이 쭉 벌어져 있는 현상 없음
-- 강하게 말하는 부분이 약하게 말하는 부분보다 openValue가 높게 나옴 (amplitude 기여)
-- 텍스트 없는 경우(SpeechSynthesis fallback) 기존 사인파 시뮬레이션 정상 동작
+- "오늘 날씨 어때?" 재생 시 입이 여러 번 열리고 닫힘 (쭉 벌어져 있지 않음)
+- SpeechSynthesis 에러 경로에서 사인파 시뮬레이션 정상 동작
 - 기존 테스트 전부 통과
 
 ---
