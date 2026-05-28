@@ -72,9 +72,12 @@ function IntegrationsPanel() {
   }
 
   async function testIntegration(key) {
+    const apiKey = state[key]?.key || "";
     try {
       const response = await fetch(buildApiUrl(`/settings/integrations/${key}/test`), {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey }),
       });
       setTestResult((prev) => ({
         ...prev,

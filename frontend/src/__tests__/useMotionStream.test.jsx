@@ -3,6 +3,7 @@ import { useMotionStream } from "../hooks/useMotionStream";
 
 jest.mock("../services/characterController", () => ({
   characterController: {
+    playEmotionUpdate: jest.fn(() => Promise.resolve()),
     playMotionSequence: jest.fn(() => Promise.resolve()),
     returnToDefault: jest.fn(() => Promise.resolve()),
     showOverlayEffect: jest.fn(),
@@ -48,7 +49,8 @@ describe("useMotionStream", () => {
       });
     });
 
-    expect(characterController.playMotionSequence).toHaveBeenCalledWith(
+    // SPEC-10: emotion_update는 playEmotionUpdate를 통해 처리됨
+    expect(characterController.playEmotionUpdate).toHaveBeenCalledWith(
       [{ abstract: "head_x", value: 15 }],
       0.8
     );

@@ -22,7 +22,6 @@ export const DEFAULT_SETTINGS = {
   },
   autonomous: {
     proactive_chat: false,
-    tip_bubbles: true,
     screen_reaction: true,
     schedule_reminder: false,
     auto_crawl: false,

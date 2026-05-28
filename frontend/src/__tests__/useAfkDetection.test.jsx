@@ -24,7 +24,7 @@ describe("useAfkDetection", () => {
     jest.resetAllMocks();
   });
 
-  test("10 minutes of inactivity sets SLEEPY mood and shows bubble", async () => {
+  test("10 minutes of inactivity sets SLEEPY mood", async () => {
     const setMood = jest.fn();
     renderHook(() => useAfkDetection({ setMood }));
 
@@ -34,16 +34,9 @@ describe("useAfkDetection", () => {
 
     await waitFor(() => expect(checkProactiveEvent).toHaveBeenCalledWith("afk_sleepy"));
     expect(setMood).toHaveBeenCalledWith("SLEEPY");
-    expect(window.hanaDesktop.showBubble).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "💤 ...zzz",
-        mood: "SLEEPY",
-        type: "think"
-      })
-    );
   });
 
-  test("activity after AFK returns to IDLE with welcome bubble", async () => {
+  test("activity after AFK returns to IDLE mood", async () => {
     const setMood = jest.fn();
     renderHook(() => useAfkDetection({ setMood }));
 
@@ -57,13 +50,6 @@ describe("useAfkDetection", () => {
     });
 
     expect(setMood).toHaveBeenCalledWith("IDLE");
-    expect(window.hanaDesktop.showBubble).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "😊 어, 왔어?",
-        mood: "HAPPY",
-        type: "talk"
-      })
-    );
   });
 
   test("night reaction checks proactive endpoint", async () => {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import PropTypes from "prop-types";
-import PhaseTag from "../common/PhaseTag";
+import { sttService } from "../../services/stt";
 
 const HINTS = [
   { label: "코드 분석", text: "코드 분석해줘" },
@@ -10,6 +10,7 @@ const HINTS = [
 
 function ChatInput({ inputRef, isStreaming, onSend }) {
   const [value, setValue] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
 
   function handleInput(event) {
     event.target.style.height = "auto";
@@ -31,9 +32,26 @@ function ChatInput({ inputRef, isStreaming, onSend }) {
   }
 
   function handleKeyDown(event) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       submit();
+    }
+  }
+
+  async function toggleVoice() {
+    if (isRecording) {
+      setIsRecording(false);
+      const result = await sttService.stop();
+      if (result.text.trim()) {
+        onSend(result.text.trim());
+      }
+    } else {
+      try {
+        await sttService.start();
+        setIsRecording(true);
+      } catch {
+        // 마이크 권한 거부 또는 미지원 환경 — 조용히 실패
+      }
     }
   }
 
@@ -48,9 +66,14 @@ function ChatInput({ inputRef, isStreaming, onSend }) {
           onChange={handleInput}
           onKeyDown={handleKeyDown}
         />
-        <button className="voice-btn" disabled type="button">
+        <button
+          className={`voice-btn${isRecording ? " recording" : ""}`}
+          type="button"
+          disabled={isStreaming}
+          onClick={toggleVoice}
+          title={isRecording ? "녹음 중 — 클릭해서 전송" : "음성 입력"}
+        >
           🎤
-          <PhaseTag>4.5</PhaseTag>
         </button>
         <button className="send-btn" type="button" disabled={isStreaming} onClick={submit}>
           전송

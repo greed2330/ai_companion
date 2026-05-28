@@ -42,13 +42,11 @@ const DEFAULT_APP_SETTINGS = {
 };
 
 const WINDOW_ROUTES = {
-  bubble: "bubble",
   charPosition: "charPosition",
   character: "character",
   main: "main"
 };
 
-const BUBBLE_SIZE = { width: 220, height: 90 };
 const MAIN_WINDOW_SIZE = { width: 420, height: 640 };
 const SNAP = 40;
 const CHARACTER_SIZE_MAP = {
@@ -58,7 +56,6 @@ const CHARACTER_SIZE_MAP = {
   XL: { w: 500, h: 800 }
 };
 
-let bubbleWindow = null;
 let charPositionWindow = null;
 let characterWindow = null;
 let mainWindow = null;
@@ -241,76 +238,12 @@ function snapToEdge(x, y, winW, winH, sw, sh) {
   };
 }
 
-function calcBubblePosition(charBounds, bubbleSize, screenSize) {
-  const { x, y, width, height } = charBounds;
-  const { width: bw, height: bh } = bubbleSize;
-  const { width: sw, height: sh } = screenSize;
-  const position =
-    y >= bh + 20
-      ? { x: x + width / 2 - bw / 2, y: y - bh - 16, tail: "bottom" }
-      : sh - (y + height) >= bh + 20
-        ? { x: x + width / 2 - bw / 2, y: y + height + 16, tail: "top" }
-        : x >= bw + 20
-          ? { x: x - bw - 16, y: y + height / 2 - bh / 2, tail: "right" }
-          : { x: x + width + 16, y: y + height / 2 - bh / 2, tail: "left" };
-
-  position.x = Math.max(0, Math.min(sw - bw, position.x));
-  position.y = Math.max(0, Math.min(sh - bh, position.y));
-  return position;
-}
-
 function getCharacterDisplay() {
   if (!characterWindow) {
     return screen.getPrimaryDisplay();
   }
 
   return screen.getDisplayMatching(characterWindow.getBounds());
-}
-
-function syncBubblePosition(force = false) {
-  if ((!bubbleWindow?.isVisible() && !force) || !characterWindow) {
-    return null;
-  }
-
-  const display = getCharacterDisplay();
-  const position = calcBubblePosition(
-    characterWindow.getBounds(),
-    BUBBLE_SIZE,
-    display.workAreaSize
-  );
-
-  bubbleWindow.setBounds({
-    x: Math.round(position.x),
-    y: Math.round(position.y),
-    width: BUBBLE_SIZE.width,
-    height: BUBBLE_SIZE.height
-  });
-  bubbleWindow.webContents.send("bubble-tail", position.tail);
-  return position;
-}
-
-function showBubble(payload) {
-  if (!bubbleWindow || !characterWindow) {
-    return null;
-  }
-
-  const position = syncBubblePosition(true);
-  bubbleWindow.webContents.send("bubble-data", {
-    captureImage: payload.captureImage || "",
-    duration: payload.duration || 0,
-    message: payload.message || "",
-    mood: payload.mood || "IDLE",
-    tail: position?.tail || "bottom",
-    type: payload.type || "talk"
-  });
-
-  if (typeof bubbleWindow.showInactive === "function") {
-    bubbleWindow.showInactive();
-  } else {
-    bubbleWindow.show();
-  }
-
-  return position;
 }
 
 function createCharacterWindow() {
@@ -339,9 +272,6 @@ function createCharacterWindow() {
 
   characterWindow.setOpacity?.((getStoredAppSettings().character.opacity || 100) / 100);
   characterWindow.setIgnoreMouseEvents(true, { forward: true });
-  characterWindow.on("move", () => {
-    syncBubblePosition();
-  });
   characterWindow.on("closed", () => {
     characterWindow = null;
   });
@@ -398,23 +328,6 @@ function createCharPositionWindow() {
     charPositionWindow = null;
   });
   return charPositionWindow;
-}
-
-function createBubbleWindow() {
-  bubbleWindow = createOverlayWindow(WINDOW_ROUTES.bubble, {
-    width: BUBBLE_SIZE.width,
-    height: BUBBLE_SIZE.height,
-    focusable: false,
-    hasShadow: false,
-    resizable: false,
-    show: false,
-    skipTaskbar: true
-  });
-
-  bubbleWindow.setIgnoreMouseEvents(true, { forward: true });
-  bubbleWindow.on("closed", () => {
-    bubbleWindow = null;
-  });
 }
 
 function createTray() {
@@ -620,7 +533,6 @@ function registerIpcHandlers() {
       size: payload?.size || previousCharPosition.size
     });
     characterWindow.webContents.send("character-settings-updated", saved.character);
-    syncBubblePosition(true);
     return saved.character;
   });
   ipcMain.handle("assets:resolve-url", (_event, relativePath) =>
@@ -718,7 +630,6 @@ function registerIpcHandlers() {
   });
   ipcMain.on("ai-name-changed", (_event, name) => {
     updateTrayTooltip(name);
-    bubbleWindow?.webContents?.send("ai-name-changed", name);
   });
   ipcMain.on("open-main-chat", () => {
     showMainWindow("chat");
@@ -732,44 +643,16 @@ function registerIpcHandlers() {
   ipcMain.on("char-mouse-leave", () => {
     characterWindow?.setIgnoreMouseEvents(true, { forward: true });
   });
-  ipcMain.on("show-bubble", (_event, payload) => {
-    showBubble(payload);
-  });
-  ipcMain.on("hide-bubble", () => {
-    bubbleWindow?.hide();
-  });
 
   ipcRegistered = true;
 }
 
-function maybeShowOnboardingBubble() {
-  if (store.get("onboardingDone")) {
-    return;
-  }
-
-  setTimeout(() => {
-    showBubble({
-      message: "안녕! 나는 하나야. 클릭해서 놀아줘",
-      mood: "HAPPY",
-      type: "talk"
-    });
-  }, 500);
-
-  setTimeout(() => {
-    showMainWindow("settings");
-  }, 3000);
-
-  store.set("onboardingDone", true);
-}
-
 function createWindows() {
   createCharacterWindow();
-  createBubbleWindow();
   createMainWindow();
   createTray();
   registerShortcuts();
   registerIpcHandlers();
-  maybeShowOnboardingBubble();
 }
 
 if (process.env.NODE_ENV !== "test") {
@@ -797,11 +680,9 @@ if (process.env.NODE_ENV !== "test") {
 
 module.exports = {
   WINDOW_ROUTES,
-  calcBubblePosition,
   createWindows,
   getStoredAppSettings,
   resolveAssetUrl,
-  showBubble,
   showMainWindow,
   snapToEdge,
   toggleWindowVisibility

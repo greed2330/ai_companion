@@ -104,15 +104,15 @@ def test_think_false_casual():
 
 
 def test_think_false_short_message():
-    """15자 미만 메시지는 think=False."""
+    """10자 이하 메시지는 think=False."""
     from backend.services.llm import should_use_think
     assert should_use_think("뭐해?") is False
 
 
-def test_think_false_chat_type():
-    """interaction_type='chat'이면 항상 False."""
+def test_think_false_game_type():
+    """interaction_type='game'이면 항상 False (즉각 반응 필요)."""
     from backend.services.llm import should_use_think
-    assert should_use_think("이 코드 왜 안돼?", interaction_type="chat") is False
+    assert should_use_think("지금 어떻게 해야 해?", interaction_type="game") is False
 
 
 def test_think_true_complex_keyword():
