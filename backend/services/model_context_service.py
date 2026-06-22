@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # 프론트엔드 characterController.js MOTION_PRESETS와 1:1 대응하는 액션 목록
 # 키: 액션 키워드 / 값: 언제 쓸지 힌트 (시스템 프롬프트에 주입됨)
 _AVAILABLE_ACTIONS: dict[str, str] = {
+    "가만히있기": "특별한 감정/반응이 없는 평온한 상황 (반드시 이 목록 중 하나는 써야 함)",
     "끄덕이기":   "동의, 이해, 확인할 때",
     "갸웃하기":   "의문, 모를 때, 흥미로울 때",
     "고개젓기":   "부정, 모르겠음",
@@ -159,6 +160,12 @@ async def on_model_changed(
 
 
 def get_current_context() -> dict:
+    # available_actions는 모델 선택 여부와 무관하게 항상 반환한다.
+    # (MOTION_PRESETS는 characterController.js에 고정 정의된 상수이므로 모델에 의존하지 않음)
+    if not _ctx:
+        return {"available_actions": _AVAILABLE_ACTIONS}
+    if "available_actions" not in _ctx:
+        return {**_ctx, "available_actions": _AVAILABLE_ACTIONS}
     return _ctx
 
 

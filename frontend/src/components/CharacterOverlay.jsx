@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import {
-  applyGaze,
   applyMood,
   applyViewportTransform,
   detectModelType,
@@ -10,7 +9,6 @@ import {
 import {
   createPettingTracker,
   getClickZone,
-  getGazeOffset,
 } from "./character/interactionUtils";
 // import { requestReactionBubble } from "../services/reactions";
 import { characterController } from "../services/characterController";
@@ -221,20 +219,6 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
     const bounds = event.currentTarget.getBoundingClientRect();
     const zone = getClickZone(event.clientY - bounds.top, bounds.height);
     pettingTracker.update({ movementX: event.movementX, zone });
-
-    window.hanaDesktop?.getCharacterBounds?.().then((charBounds) => {
-      const gaze = getGazeOffset(
-        event.screenX,
-        event.screenY,
-        charBounds || {
-          x: 0,
-          y: 0,
-          width: bounds.width,
-          height: bounds.height,
-        }
-      );
-      applyGaze(rendererRef.current, gaze.x, gaze.y);
-    });
 
     if (!currentDrag) {
       return;

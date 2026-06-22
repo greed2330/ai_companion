@@ -3,6 +3,8 @@ import { buildApiUrl } from "./api";
 // 한국어 키워드 → 파라미터 step 배열
 // 백엔드 model_context_service.py _AVAILABLE_ACTIONS와 이름이 1:1 대응됨
 const MOTION_PRESETS = {
+  // null: playInlineActions에서 !MOTION_PRESETS[name] 조건으로 조용히 스킵됨 (no-op)
+  가만히있기: null,
   끄덕이기: [
     { abstract: "head_y", value: 12,  duration: 200, easing: "ease_out",    return_to_default: true, repeat: 2 },
     { abstract: "smile",  value: 0.4, duration: 300, easing: "ease_in_out", return_to_default: true },

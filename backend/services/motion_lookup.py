@@ -5,15 +5,17 @@ LLM 호출 없이 결정론적으로 반환한다.
 chat_pipeline._background_process의 2nd LLM call을 대체한다.
 """
 
+# 키: response_parser.py ParsedResponse.emotion 값
+# 값: characterController.js MOTION_PRESETS 한국어 키와 1:1 대응 (반드시 일치해야 함)
 EMOTION_MOTION_MAP: dict[str, list[str]] = {
-    "HAPPY":        ["bounce", "wave"],
-    "CONCERNED":    ["lean_forward", "tilt_head"],
-    "EXCITED":      ["jump", "spin"],
-    "CURIOUS":      ["tilt_head", "look_around"],
-    "AFFECTIONATE": ["nod", "smile"],
-    "GAMING":       ["cheer", "lean_forward"],
-    "SLEEPY":       ["slow_sway", "yawn"],
-    "IDLE":         ["idle_sway"],
+    "HAPPY":        ["활짝웃기"],
+    "CONCERNED":    ["걱정하기"],
+    "EXCITED":      ["활짝웃기", "반짝이는눈"],
+    "CURIOUS":      ["갸웃하기"],
+    "AFFECTIONATE": ["수줍어하기"],
+    "GAMING":       ["활짝웃기"],
+    "SLEEPY":       ["하품하기"],
+    "IDLE":         ["가만히있기"],
 }
 
 EMOTION_TENSION_MAP: dict[str, float] = {
