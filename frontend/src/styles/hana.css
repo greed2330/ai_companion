@@ -289,9 +289,24 @@ button, input, select, textarea { font: inherit; }
 .voice-btn {
   background: var(--hana-surface3);
   border: 1px solid var(--hana-border2);
-  color: var(--hana-muted);
+  color: var(--hana-text);
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.voice-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.voice-btn.recording {
+  background: var(--hana-accent);
+  border-color: var(--hana-accent);
+  color: #fff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hana-accent) 30%, transparent);
+  animation: pulse-mic 1.2s ease-in-out infinite;
+}
+@keyframes pulse-mic {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--hana-accent) 30%, transparent); }
+  50%       { box-shadow: 0 0 0 6px color-mix(in srgb, var(--hana-accent) 10%, transparent); }
 }
 .send-btn {
   background: var(--hana-accent);

@@ -124,8 +124,21 @@ async def _fetch_ollama_models() -> list[str]:
 @router.get("/settings/models")
 async def get_character_models() -> dict:
     """사용 가능한 캐릭터 모델 목록(Live2D + PMX)과 현재 선택 모델을 반환한다."""
+    global _current_character_model_id
     models = _scan_models()
     current = _current_character_model_id or (models[0]["id"] if models else None)
+
+    # fallback으로 결정된 모델을 런타임에 고정하고 model_context 초기화.
+    # CharacterOverlay가 화면에 띄우는 모델과 백엔드 model_context를 동기화한다.
+    if current and current != _current_character_model_id:
+        _current_character_model_id = current
+        selected = next((m for m in models if m["id"] == current), None)
+        if selected:
+            try:
+                await on_model_changed(selected["id"], selected["path"], selected["type"])
+            except Exception as e:
+                logger.warning("model_context auto-init failed: %s", e)
+
     logger.info(f"/settings/models scanned: {len(models)} models found, current={current}")
     return {"models": models, "current": current}
 
@@ -391,7 +404,6 @@ async def get_autonomous_settings() -> dict:
 
 class AutonomousRequest(BaseModel):
     proactive_chat: bool | None = None
-    tip_bubbles: bool | None = None
     screen_reaction: bool | None = None
     schedule_reminder: bool | None = None
     auto_crawl: bool | None = None
@@ -428,7 +440,44 @@ async def get_model_context() -> dict:
     return ctx
 
 
-# ── 외부 연동 테스트 엔드포인트 ───────────────────────────────────
+# ── 외부 연동 CRUD + 테스트 엔드포인트 ───────────────────────────
+
+
+@router.get("/settings/integrations/{name}")
+async def get_integration(name: str) -> dict:
+    """연동 상태 조회. status: 'disconnected' | 'key_present' | 'connected'"""
+    from backend.services.settings_service import (
+        get_integration as _get, _VALID_INTEGRATIONS,
+    )
+    if name not in _VALID_INTEGRATIONS:
+        raise HTTPException(status_code=404, detail={
+            "error": True,
+            "code": "UNKNOWN_INTEGRATION",
+            "message": f"'{name}' 연동은 지원하지 않아.",
+        })
+    return _get(name)
+
+
+class IntegrationSaveRequest(BaseModel):
+    key: str
+
+
+@router.post("/settings/integrations/{name}")
+async def save_integration_key(name: str, req: IntegrationSaveRequest) -> dict:
+    """API 키 저장."""
+    from backend.services.settings_service import (
+        set_integration_key as _set, _VALID_INTEGRATIONS,
+    )
+    if name not in _VALID_INTEGRATIONS:
+        raise HTTPException(status_code=404, detail={
+            "error": True,
+            "code": "UNKNOWN_INTEGRATION",
+            "message": f"'{name}' 연동은 지원하지 않아.",
+        })
+    _set(name, req.key)
+    logger.info(f"/settings/integrations/{name} key saved")
+    return {"success": True}
+
 
 _INTEGRATION_HANDLERS: dict[str, str] = {
     "serper":           "https://google.serper.dev/search",

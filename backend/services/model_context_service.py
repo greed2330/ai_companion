@@ -12,6 +12,24 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# 프론트엔드 characterController.js MOTION_PRESETS와 1:1 대응하는 액션 목록
+# 키: 액션 키워드 / 값: 언제 쓸지 힌트 (시스템 프롬프트에 주입됨)
+_AVAILABLE_ACTIONS: dict[str, str] = {
+    "가만히있기": "특별한 감정/반응이 없는 평온한 상황 (반드시 이 목록 중 하나는 써야 함)",
+    "끄덕이기":   "동의, 이해, 확인할 때",
+    "갸웃하기":   "의문, 모를 때, 흥미로울 때",
+    "고개젓기":   "부정, 모르겠음",
+    "활짝웃기":   "기쁨, 성공, 좋은 소식",
+    "놀라기":     "예상치 못한 정보, 충격",
+    "걱정하기":   "안타까움, 우려, 부정적 상황",
+    "생각하기":   "고민 중, 답을 찾는 중",
+    "하품하기":   "졸릴 때, 새벽 대화",
+    "수줍어하기": "칭찬받을 때, 부끄러운 상황",
+    "반짝이는눈": "흥미로운 것 발견, 엄청 마음에 들 때",
+    "울먹이기":   "감동적인 얘기, 슬픈 상황 공감",
+    "긴장하기":   "어려운 작업, 불확실한 결과 기다릴 때",
+}
+
 # 추상 이름 → 모델 파라미터 이름 매핑 키워드
 _ABSTRACT_KEYWORDS: dict[str, list[str]] = {
     "head_x":    ["AngleX", "HeadX", "頭X"],
@@ -119,11 +137,12 @@ async def on_model_changed(
 
     mapping = _map_abstract(raw)
     _ctx = {
-        "model_id":       model_id,
-        "model_type":     model_type,
+        "model_id":         model_id,
+        "model_type":       model_type,
         "abstract_mapping": mapping,
-        "param_ranges":   raw,
-        "llm_context":    _build_llm_context(model_type, mapping, raw),
+        "param_ranges":     raw,
+        "llm_context":      _build_llm_context(model_type, mapping, raw),
+        "available_actions": _AVAILABLE_ACTIONS,
     }
 
     os.makedirs("data", exist_ok=True)
@@ -141,6 +160,12 @@ async def on_model_changed(
 
 
 def get_current_context() -> dict:
+    # available_actions는 모델 선택 여부와 무관하게 항상 반환한다.
+    # (MOTION_PRESETS는 characterController.js에 고정 정의된 상수이므로 모델에 의존하지 않음)
+    if not _ctx:
+        return {"available_actions": _AVAILABLE_ACTIONS}
+    if "available_actions" not in _ctx:
+        return {**_ctx, "available_actions": _AVAILABLE_ACTIONS}
     return _ctx
 
 

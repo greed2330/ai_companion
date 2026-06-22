@@ -11,7 +11,6 @@ function BehaviorPanel({ settings }) {
   const allState = useMemo(() => {
     const values = [
       current.autonomous.proactive_chat,
-      current.autonomous.tip_bubbles,
       current.autonomous.schedule_reminder,
     ];
 
@@ -24,7 +23,6 @@ function BehaviorPanel({ settings }) {
     return "unchecked";
   }, [
     current.autonomous.proactive_chat,
-    current.autonomous.tip_bubbles,
     current.autonomous.schedule_reminder,
   ]);
 
@@ -33,7 +31,6 @@ function BehaviorPanel({ settings }) {
     updatePending("autonomous", {
       ...current.autonomous,
       proactive_chat: enabled,
-      tip_bubbles: enabled,
       schedule_reminder: enabled,
       auto_crawl: enabled,
     });
@@ -51,16 +48,6 @@ function BehaviorPanel({ settings }) {
               updatePending("autonomous", {
                 ...current.autonomous,
                 proactive_chat: value === "checked",
-              })
-            }
-          />
-          <HierarchyCheckbox
-            label="팁 말풍선"
-            checked={current.autonomous.tip_bubbles ? "checked" : "unchecked"}
-            onChange={(value) =>
-              updatePending("autonomous", {
-                ...current.autonomous,
-                tip_bubbles: value === "checked",
               })
             }
           />

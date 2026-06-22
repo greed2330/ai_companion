@@ -4,8 +4,6 @@ describe("LipSyncService", () => {
   let postMessageSpy;
 
   beforeEach(() => {
-    // lipsync.js는 모듈 로드 시 BroadcastChannel을 생성하므로
-    // prototype에 spy를 걸어 postMessage 호출을 감지한다.
     postMessageSpy = jest.spyOn(BroadcastChannel.prototype, "postMessage");
   });
 
@@ -14,7 +12,7 @@ describe("LipSyncService", () => {
     lipSyncService.stop();
   });
 
-  test("starts lip sync on tts-start event", () => {
+  test("text 없는 tts-start → start(amplitude) 경로 호출", () => {
     const startSpy = jest.spyOn(lipSyncService, "start");
 
     window.dispatchEvent(
@@ -24,18 +22,38 @@ describe("LipSyncService", () => {
     expect(startSpy).toHaveBeenCalled();
   });
 
-  test("stop sends lipsync_value 0 via BroadcastChannel", () => {
-    // tts-start로 더미 모드 시작
+  test("text 있는 tts-start → startWithText 경로 호출", () => {
+    const startWithTextSpy = jest.spyOn(lipSyncService, "startWithText");
+
+    window.dispatchEvent(
+      new CustomEvent("tts-start", { detail: { audio: null, text: "안녕" } })
+    );
+
+    expect(startWithTextSpy).toHaveBeenCalledWith(null, "안녕");
+  });
+
+  test("stop → lipsync_value 0 BroadcastChannel 전송", () => {
     window.dispatchEvent(
       new CustomEvent("tts-start", { detail: { audio: null, params: {} } })
     );
-    // tts-end로 stop() 호출
     window.dispatchEvent(new CustomEvent("tts-end"));
 
-    // stop()이 {type:"lipsync_value", value:0}을 postMessage로 보내야 함
     expect(postMessageSpy).toHaveBeenCalledWith({
       type: "lipsync_value",
       value: 0,
     });
+  });
+
+  test("startWithText(null, text) → _dummy 경로 (audio 없음)", () => {
+    const dummySpy = jest.spyOn(lipSyncService, "_dummy");
+    lipSyncService.startWithText(null, "안녕");
+    expect(dummySpy).toHaveBeenCalled();
+  });
+
+  test("startWithText → _runSchedule 호출 (audio.duration > 0, 한국어 텍스트)", () => {
+    const runScheduleSpy = jest.spyOn(lipSyncService, "_runSchedule");
+    const mockAudio = { duration: 2, ended: false, currentTime: 0 };
+    lipSyncService.startWithText(mockAudio, "안녕하세요");
+    expect(runScheduleSpy).toHaveBeenCalledWith(mockAudio);
   });
 });

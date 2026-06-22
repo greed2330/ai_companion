@@ -8,8 +8,7 @@ const SPEECH_OPTIONS = [
   "bright_friend",
   "cheerful_girl",
   "tsundere",
-  "calm_sister",
-  "playful",
+  "calm_mentor",
   "custom",
 ];
 
@@ -17,8 +16,7 @@ const SPEECH_LABELS = [
   "밝은 친구",
   "해맑은 소녀",
   "츤데레",
-  "차분한 누나",
-  "장난꾸러기",
+  "차분한 멘토",
   "직접 입력",
 ];
 

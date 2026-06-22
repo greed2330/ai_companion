@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import {
-  applyGaze,
   applyMood,
   applyViewportTransform,
   detectModelType,
@@ -10,7 +9,6 @@ import {
 import {
   createPettingTracker,
   getClickZone,
-  getGazeOffset,
 } from "./character/interactionUtils";
 // import { requestReactionBubble } from "../services/reactions";
 import { characterController } from "../services/characterController";
@@ -21,14 +19,7 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
   const rendererRef = useRef(null);
   const dragRef = useRef(null);
   const pettingTracker = useMemo(
-    () =>
-      createPettingTracker(() => {
-        window.hanaDesktop?.showBubble?.({
-          message: "기분 좋다~",
-          mood: "HAPPY",
-          type: "talk",
-        });
-      }),
+    () => createPettingTracker(() => {}),
     []
   );
 
@@ -68,6 +59,7 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
         rendererRef.current = instance;
         if (instance) {
           await characterController.init(instance, modelId);
+          if (import.meta.env.DEV) window.__cc = characterController; // 모션 테스트용
           syncViewport(instance, viewport);
         }
         setHasRenderableModel(Boolean(instance));
@@ -149,7 +141,16 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
       const { type } = event.data || {};
 
       if (type === "lipsync_value") {
-        characterController.setAbstractParam("mouth_open", event.data.value ?? 0);
+        // 모션 재생 중에는 mouth_open 간섭하지 않음 (표정 우선)
+        if (!characterController._motionActive) {
+          characterController.setAbstractParam("mouth_open", event.data.value ?? 0);
+        }
+        return;
+      }
+
+      if (type === "inline_actions") {
+        // MainWindow에서 BroadcastChannel로 전달된 [action:] 태그 처리
+        characterController.playInlineActions(event.data.actions ?? []).catch(() => {});
         return;
       }
 
@@ -218,20 +219,6 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
     const bounds = event.currentTarget.getBoundingClientRect();
     const zone = getClickZone(event.clientY - bounds.top, bounds.height);
     pettingTracker.update({ movementX: event.movementX, zone });
-
-    window.hanaDesktop?.getCharacterBounds?.().then((charBounds) => {
-      const gaze = getGazeOffset(
-        event.screenX,
-        event.screenY,
-        charBounds || {
-          x: 0,
-          y: 0,
-          width: bounds.width,
-          height: bounds.height,
-        }
-      );
-      applyGaze(rendererRef.current, gaze.x, gaze.y);
-    });
 
     if (!currentDrag) {
       return;

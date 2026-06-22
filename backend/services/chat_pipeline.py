@@ -117,7 +117,16 @@ async def _load_recent_messages(
         (conversation_id, limit),
     ) as cursor:
         rows = await cursor.fetchall()
-    return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+    messages = [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+
+    # user→user 연속 턴 제거: 앞의 user를 드롭해 LLM 혼동 방지
+    cleaned: list[dict] = []
+    for msg in messages:
+        if cleaned and cleaned[-1]["role"] == msg["role"] == "user":
+            cleaned[-1] = msg  # 같은 역할 연속이면 최신 것으로 교체
+        else:
+            cleaned.append(msg)
+    return cleaned
 
 
 async def _update_message_mood(message_id: str, mood: str) -> None:
@@ -410,10 +419,18 @@ async def run_chat_pipeline(
                 yield f"data: {json.dumps(room_event, ensure_ascii=False)}\n\n"
 
             # 히스토리 + 메모리 병렬 조회
-            history, memories = await asyncio.gather(
-                _load_recent_messages(db, cid),
-                search_memory(_OWNER_USER_ID, message),
-            )
+            # 짧은 잡담(≤12자)·게임 즉각반응은 메모리 검색 생략 (지연 방지)
+            _skip_memory = len(message.strip()) <= 12 or interaction_type == "game"
+            if _skip_memory:
+                history, memories = await asyncio.gather(
+                    _load_recent_messages(db, cid),
+                    asyncio.sleep(0, result=[]),
+                )
+            else:
+                history, memories = await asyncio.gather(
+                    _load_recent_messages(db, cid),
+                    search_memory(_OWNER_USER_ID, message),
+                )
             for mem in memories:
                 await update_confidence(mem["id"], delta=0.1)
 
@@ -463,6 +480,9 @@ async def run_chat_pipeline(
                         yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
             except Exception as exc:
                 logger.error("/chat LLM error: cid=%s error=%s", cid, exc)
+                # user 메시지 롤백 — assistant reply 없이 남으면 다음 요청 히스토리가 깨짐
+                await db.execute("DELETE FROM messages WHERE id = ?", (user_msg_id,))
+                await db.commit()
                 yield (
                     f"data: {json.dumps({'type': 'error', 'code': 'LLM_UNAVAILABLE', 'message': str(exc)}, ensure_ascii=False)}\n\n"
                 )

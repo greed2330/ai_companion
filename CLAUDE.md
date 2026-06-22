@@ -12,14 +12,14 @@
 - Repo structure: AGENTS.md section 5-3
 
 ## Your Role
-**You are backend-only.**
-- Scope: `backend/` directory only
-- NEVER touch `frontend/`
+**You own the full stack.**
+- Scope: `backend/` AND `frontend/` (Codex 역할 흡수됨, 2026-04)
+- NEVER touch `data/` (개인 대화 데이터 — 절대 커밋 금지)
 - If unclear or blocked: stop, log the question in STATUS.md
 
 ---
 
-## Four Core Principles (Karpathy)
+## Four Core Principles (Karpathy가 "vibe coding" 비판에서 언급한 문제들 + 이 프로젝트에서 실제로 발생한 버그에서 도출한 원칙)
 
 ### 1. Think Before Coding
 - State your assumptions explicitly before writing any code
@@ -50,6 +50,29 @@
   ```
 - Define success criteria before writing code, not after
 - Loop until verified. Don't stop at "it should work" — confirm it does.
+
+---
+
+## Two Rules Added From Real Bugs
+
+> 아래 두 규칙은 이 프로젝트에서 실제로 발생한 버그에서 도출됐다.
+> Karpathy의 "vibe coding" 비판(그럴듯해 보이는 코드를 검증 없이 수용하는 것)의 구체적 사례.
+
+### 5. Read Before You Write
+수정할 파일을 열기 전에, 그 파일과 **직접 연결된 파일**부터 읽는다.
+- 호출하는 쪽, 상수를 공유하는 쪽, 타입을 정의하는 쪽
+- Self-review(사후 읽기)는 사전 읽기를 대체하지 않는다
+- 실패 사례: `motion_lookup.py` 영어 이름 → `characterController.js` 한국어 프리셋 불일치가 수개월간 미발견
+
+### 6. Cross-File Contract Check
+두 파일이 같은 상수 / 키 / 이름을 공유할 때:
+- 양쪽 파일을 함께 읽고, 수정 후 일치 여부를 명시적으로 확인한다
+- "이름이 같아야 한다"는 가정은 코드로 검증하거나 파일 상단 주석으로 명시한다
+  ```python
+  # 이 파일의 값은 frontend/src/services/characterController.js
+  # MOTION_PRESETS 키와 반드시 일치해야 한다
+  ```
+- 한쪽을 바꿨으면 반드시 다른 쪽도 grep으로 확인한다
 
 ---
 
@@ -178,7 +201,7 @@ Never assume Codex knows something unless it's written there.
 | Starting work | Log: files you own + what you're building |
 | Task complete | Log: done status + handoff notes for Codex |
 | Blocked | Log: the exact blocker. Stop. Do not guess. |
-| Need something from frontend | Log: what and why. Wait for Codex. |
+| Frontend 작업 필요 | 직접 처리 (full stack 담당). STATUS.md에 작업 내역 기록. |
 | API contract must change | STOP. Log proposed change. Wait for Claude (web) approval. |
 
 Update STATUS.md after every meaningful unit of work — not just at PR time.
@@ -208,7 +231,6 @@ claude/* ← your branches only. never touch codex/*.
 - When owner says "wrap up" / "마무리해줘" → run self-review → update STATUS.md → close
 
 ### NEVER
-- Modify `frontend/`
 - Commit anything inside `data/`
 - Change DB schema from AGENTS.md section 6
 - Hardcode model name, API keys, or env vars

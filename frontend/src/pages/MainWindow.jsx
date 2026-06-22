@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ChatLayout from "../components/chat/ChatLayout";
 import SettingsLayout from "../components/settings/SettingsLayout";
 import useMoodStream from "../hooks/useMoodStream";
+import { useMotionStream } from "../hooks/useMotionStream";
 import useConversations from "../hooks/useConversations";
 import useChat from "../hooks/useChat";
 
@@ -33,6 +34,9 @@ function MainWindow() {
       }
     },
   });
+
+  // emotion_update → Live2D 모션 싱크 (채팅창 open 여부 무관하게 항상 수신)
+  useMotionStream(currentConversationId);
 
   const chat = useChat(currentConversationId, {
     onConversationCreated: (conversationId) => {

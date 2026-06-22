@@ -125,6 +125,18 @@ async def build_context(
     except Exception as e:
         logger.error("SPEC-06 warmth/identity 주입 실패: %s", e)
 
+    # SPEC-10: 캐릭터 모델이 로드된 경우 available_actions 주입
+    available_actions: dict[str, str] = {}
+    try:
+        from backend.services.model_context_service import get_current_context
+        model_ctx = get_current_context()
+        _actions = model_ctx.get("available_actions", {})
+        # 옛날 캐시 파일이 list 형태로 저장된 경우 방어 (dict[str,str]만 허용)
+        if isinstance(_actions, dict):
+            available_actions = _actions
+    except Exception as e:
+        logger.debug("model_context 조회 실패 (모델 미선택): %s", e)
+
     system_prompt = build_system_prompt(
         mood=mood,
         persona=persona,
@@ -133,6 +145,7 @@ async def build_context(
         memories=memory_list,
         preferences=preferences,
         philosophy=philosophy,
+        available_actions=available_actions or None,
     )
 
     # warmth + identity 프롬프트 앞에 prepend

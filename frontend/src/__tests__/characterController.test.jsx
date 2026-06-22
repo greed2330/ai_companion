@@ -63,7 +63,7 @@ describe("CharacterController", () => {
     ).toHaveBeenLastCalledWith("ParamAngleX", 30);
   });
 
-  test("plays motion sequence", async () => {
+  test("plays motion sequence with step objects", async () => {
     const controller = new CharacterController();
     const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
     await controller.init(createLive2dRenderer(), "hana");
@@ -73,6 +73,43 @@ describe("CharacterController", () => {
     ]);
 
     expect(tweenSpy).toHaveBeenCalledWith("head_x", 15, 300, "ease_out");
+  });
+
+  test("expands string motion names via MOTION_PRESETS", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    // "끄덕이기" → [{abstract:"head_y",...},{abstract:"smile",...}]
+    await controller.playMotionSequence(["끄덕이기"], 1);
+
+    expect(tweenSpy).toHaveBeenCalledWith("head_y", expect.any(Number), 200, "ease_out");
+  });
+
+  test("ignores unknown string motion names without error", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    await expect(
+      controller.playMotionSequence(["nonexistent_motion"])
+    ).resolves.toBeUndefined();
+    expect(tweenSpy).not.toHaveBeenCalled();
+  });
+
+  test("handles mixed string and object steps", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    await controller.playMotionSequence([
+      "끄덕이기",
+      { abstract: "smile", value: 0.5, duration: 200 }
+    ]);
+
+    // "끄덕이기" expands to head_y step; "smile" is a direct step
+    expect(tweenSpy).toHaveBeenCalledWith("head_y", expect.any(Number), 200, "ease_out");
+    expect(tweenSpy).toHaveBeenCalledWith("smile", 0.5, 200, "ease_out");
   });
 
   test("applies tension level to motion sequence", async () => {
@@ -132,6 +169,58 @@ describe("CharacterController", () => {
     expect(controller._silentMode).toBe(true);
     controller.exitSilentPresence();
     expect(controller._silentMode).toBe(false);
+  });
+
+  test("playEmotionUpdate is blocked when _inlineActionsActive", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    controller._inlineActionsActive = true;
+    await controller.playEmotionUpdate([{ abstract: "head_x", value: 10, duration: 200 }]);
+
+    expect(tweenSpy).not.toHaveBeenCalled();
+  });
+
+  test("playEmotionUpdate sets and clears _motionActive", async () => {
+    const controller = new CharacterController();
+    jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    const activeDuring = [];
+    const origReturn = controller.returnToDefault.bind(controller);
+    jest.spyOn(controller, "returnToDefault").mockImplementation(async (...args) => {
+      activeDuring.push(controller._motionActive);
+      return origReturn(...args);
+    });
+
+    await controller.playEmotionUpdate([{ abstract: "head_x", value: 10, duration: 200 }]);
+
+    expect(activeDuring[0]).toBe(true);
+    expect(controller._motionActive).toBe(false);
+  });
+
+  test("playInlineActions sets _inlineActionsActive during execution", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    const promise = controller.playInlineActions(["끄덕이기"]);
+    expect(controller._inlineActionsActive).toBe(true);
+    await promise;
+    expect(controller._inlineActionsActive).toBe(false);
+    expect(tweenSpy).toHaveBeenCalled();
+  });
+
+  test("playInlineActions skips unknown action names", async () => {
+    const controller = new CharacterController();
+    const tweenSpy = jest.spyOn(controller, "_tween").mockResolvedValue();
+    await controller.init(createLive2dRenderer(), "hana");
+
+    await controller.playInlineActions(["totally_unknown_action"]);
+
+    expect(tweenSpy).not.toHaveBeenCalled();
+    expect(controller._inlineActionsActive).toBe(false);
   });
 
   test("does not create duplicate silent presence loops", async () => {

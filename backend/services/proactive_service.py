@@ -54,18 +54,12 @@ async def can_trigger(event_type: str) -> bool:
     주기 규칙을 모두 통과하면 True 반환.
 
     체크 순서:
-    1. 삐짐 상태 — 예외 이벤트 외 False
-    2. DAILY_ONCE — 오늘 이미 발생했으면 False
-    3. INTERVAL_RULES — 최소 간격 미달이면 False (None = 세션당 1회)
-    4. DAILY_MAX — 하루 최대 초과하면 False
-    5. 무시 억제 — autonomous_talk 한정, 당일 무시 3회 이상이면 False
+    1. DAILY_ONCE — 오늘 이미 발생했으면 False
+    2. INTERVAL_RULES — 최소 간격 미달이면 False (None = 세션당 1회)
+    3. DAILY_MAX — 하루 최대 초과하면 False
+    4. 무시 억제 — autonomous_talk 한정, 당일 무시 3회 이상이면 False
     """
-    # 1. 삐짐 상태 차단 (DB 불필요 — in-memory 체크)
-    from backend.services.sulky_service import is_sulky
-    if is_sulky() and event_type not in _SULKY_EXCEPTIONS:
-        logger.debug("can_trigger: blocked — sulky state active (event=%s)", event_type)
-        return False
-
+    # 삐짐(sulky) 시스템은 미구현 확정 — 체크 제거
     today = _today()
     async with aiosqlite.connect(DB_PATH) as db:
 

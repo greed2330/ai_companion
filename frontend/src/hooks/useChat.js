@@ -3,6 +3,10 @@ import { buildApiUrl } from "../services/api";
 import { submitFeedback as postFeedback } from "../services/feedback";
 import { OUTPUT_MODES } from "../constants/outputModes";
 import { ttsService } from "../services/tts";
+import { characterController } from "../services/characterController";
+import "../services/lipsync"; // tts-start/tts-end 이벤트 리스너 등록 (side-effect import)
+
+const _ACTION_TAG_RE = /\[action:([^\]]+)\]/g;
 
 export default function useChat(
   conversationId,
@@ -36,10 +40,13 @@ export default function useChat(
       return;
     }
 
+    // 재생 중인 TTS가 있으면 즉시 중단하고 새 응답 시작
+    ttsService.stop();
+
     // Read outputMode from Electron store at send time so it reflects the latest saved setting.
     const appSettings = await window.hanaDesktop?.getAppSettings?.() || {};
     const outputMode = appSettings?.voice?.outputMode || OUTPUT_MODES.CHAT;
-    const isVoiceMode = outputMode === OUTPUT_MODES.VOICE || outputMode === OUTPUT_MODES.BUBBLE_VOICE;
+    const isVoiceMode = outputMode === OUTPUT_MODES.VOICE;
 
     const userMessage = {
       role: "user",
@@ -102,20 +109,32 @@ export default function useChat(
             const event = JSON.parse(raw);
             if (event.type === "token") {
               accumulatedContent += event.content || "";
+              // [action:xxx] 태그는 표시하지 않고 누적만 함
+              const displayContent = accumulatedContent.replace(_ACTION_TAG_RE, "");
               setMessages((prev) =>
                 prev.map((message) =>
                   message.id === tempId
-                    ? { ...message, content: message.content + (event.content || "") }
+                    ? { ...message, content: displayContent }
                     : message
                 )
               );
             } else if (event.type === "done") {
+              // [action:xxx] 추출 후 정리된 텍스트로 최종 업데이트
+              const actions = [];
+              let actionMatch;
+              _ACTION_TAG_RE.lastIndex = 0;
+              while ((actionMatch = _ACTION_TAG_RE.exec(accumulatedContent)) !== null) {
+                actions.push(actionMatch[1]);
+              }
+              const cleanContent = accumulatedContent.replace(_ACTION_TAG_RE, "").trim();
+
               setMessages((prev) =>
                 prev.map((message) =>
                   message.id === tempId
                     ? {
                         ...message,
                         id: event.message_id,
+                        content: cleanContent,
                         streaming: false,
                         created_at: event.created_at || new Date().toISOString(),
                       }
@@ -127,8 +146,13 @@ export default function useChat(
               }
               onMessagePersisted?.();
               setIsStreaming(false);
-              if (isVoiceMode && accumulatedContent) {
-                ttsService.speak(accumulatedContent).catch(() => {});
+              // 인라인 액션 모션 큐 실행 — CharacterWindow로 BroadcastChannel 전달
+              // (MainWindow의 characterController는 미초기화 상태이므로 직접 호출 불가)
+              if (actions.length) {
+                new BroadcastChannel("hana-overlay").postMessage({ type: "inline_actions", actions });
+              }
+              if (isVoiceMode && cleanContent) {
+                ttsService.speak(cleanContent).catch(() => {});
               }
             } else if (event.type === "room_change") {
               onRoomChange?.(event.room_type || "일반");

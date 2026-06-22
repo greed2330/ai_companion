@@ -5,13 +5,11 @@ import PhaseTag from "../../common/PhaseTag";
 import { useVoice } from "../../../hooks/useVoice";
 
 const OUTPUT_OPTIONS = [
-  { value: OUTPUT_MODES.CHAT,         label: "채팅창",     desc: "메인 창에 텍스트 표시" },
-  { value: OUTPUT_MODES.BUBBLE,       label: "말풍선",     desc: "캐릭터 옆 말풍선 표시" },
-  { value: OUTPUT_MODES.VOICE,        label: "음성",       desc: "TTS만 재생",            phase: "4.5" },
-  { value: OUTPUT_MODES.BUBBLE_VOICE, label: "말풍선+음성", desc: "말풍선과 음성을 동시에", phase: "4.5" },
+  { value: OUTPUT_MODES.CHAT,  label: "채팅창", desc: "메인 창에 텍스트 표시" },
+  { value: OUTPUT_MODES.VOICE, label: "음성",   desc: "TTS만 재생",            phase: "4.5" },
 ];
 
-const VOICE_OUTPUT_MODES = new Set([OUTPUT_MODES.VOICE, OUTPUT_MODES.BUBBLE_VOICE]);
+const VOICE_OUTPUT_MODES = new Set([OUTPUT_MODES.VOICE]);
 
 function EngineCard({ engine, isActive, onSelect }) {
   const unavailable = !engine.available;

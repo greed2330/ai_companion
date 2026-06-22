@@ -32,7 +32,7 @@ export class TTSService {
         throw new Error("TTS unavailable");
       }
 
-      await this._playBlob(await response.blob(), params);
+      await this._playBlob(await response.blob(), text, params);
     } catch {
       await this._fallback(text, params);
     } finally {
@@ -44,7 +44,7 @@ export class TTSService {
     }
   }
 
-  async _playBlob(blob, params) {
+  async _playBlob(blob, text, params = {}) {
     return new Promise((resolve) => {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
@@ -52,7 +52,7 @@ export class TTSService {
       audio.onplay = () => {
         window.dispatchEvent(
           new CustomEvent("tts-start", {
-            detail: { audio, params }
+            detail: { audio, text, params }
           })
         );
       };
