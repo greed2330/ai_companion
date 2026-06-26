@@ -126,16 +126,43 @@ button, input, select, textarea { font: inherit; }
   text-transform: uppercase;
 }
 .conv-item {
-  padding: 7px 8px;
+  position: relative;
+  padding: 7px 22px 7px 8px;
   border-radius: var(--hana-r-sm);
   cursor: pointer;
   border: 1px solid transparent;
   margin-bottom: 1px;
 }
+.conv-item:hover { background: rgba(255,255,255,0.03); }
 .conv-item.active {
   background: rgba(124,106,247,0.12);
   border-color: rgba(124,106,247,0.25);
 }
+.conv-delete-btn {
+  position: absolute;
+  top: 6px;
+  right: 5px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--hana-r-sm);
+  background: transparent;
+  color: var(--hana-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.conv-item:hover .conv-delete-btn { opacity: 0.55; }
+.conv-delete-btn:hover {
+  opacity: 1;
+  background: rgba(224,82,82,0.18);
+  color: var(--hana-danger);
+}
+.conv-delete-btn svg { display: block; }
 .conv-title {
   font-size: 11px;
   font-weight: 500;
