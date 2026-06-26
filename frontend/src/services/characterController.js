@@ -226,6 +226,9 @@ export class CharacterController {
 
     try {
       if (this.renderer.type === "live2d") {
+        if (import.meta.env.DEV) {
+          console.log(`[cc] _apply live2d: ${param} = ${value.toFixed(3)}`);
+        }
         this.renderer.model?.internalModel?.coreModel?.setParameterValueById(param, value);
         return;
       }
@@ -259,6 +262,11 @@ export class CharacterController {
       }
       return [step];
     });
+
+    if (import.meta.env.DEV) {
+      console.log("[cc] playMotionSequence:", sequence, "→ expanded:", expanded.length, "steps");
+      if (!expanded.length) console.warn("[cc] ⚠ 알 수 없는 모션 이름 — MOTION_PRESETS에 없음:", sequence);
+    }
 
     if (!expanded.length) {
       return;
@@ -421,7 +429,11 @@ export class CharacterController {
   // SPEC-10: emotion_update 폴백 — 인라인 액션 실행 중에는 건너뜀
   async playEmotionUpdate(sequence, tensionLevel = 1) {
     if (this._inlineActionsActive) {
+      if (import.meta.env.DEV) console.log("[cc] playEmotionUpdate 스킵 — inline 실행 중");
       return;
+    }
+    if (import.meta.env.DEV) {
+      console.log("[cc] playEmotionUpdate:", sequence, "tension:", tensionLevel);
     }
     this._motionActive = true;
     try {
@@ -437,11 +449,15 @@ export class CharacterController {
     if (!actionNames?.length) {
       return;
     }
+    if (import.meta.env.DEV) {
+      console.log("[cc] playInlineActions:", actionNames);
+    }
     this._inlineActionsActive = true;
     this._motionActive = true;
     try {
       for (const name of actionNames) {
         if (!MOTION_PRESETS[name]) {
+          if (import.meta.env.DEV) console.warn("[cc] ⚠ 스킵:", name, "(가만히있기이거나 없는 프리셋)");
           continue;
         }
         await this.playMotionSequence([name], 1);

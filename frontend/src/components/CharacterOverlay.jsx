@@ -141,10 +141,10 @@ function CharacterOverlay({ mood, modelId = "", modelPath = "", modelName = "하
       const { type } = event.data || {};
 
       if (type === "lipsync_value") {
-        // 모션 재생 중에는 mouth_open 간섭하지 않음 (표정 우선)
-        if (!characterController._motionActive) {
-          characterController.setAbstractParam("mouth_open", event.data.value ?? 0);
-        }
+        // 립싱크가 입(mouth_open)을 전담한다. _motionActive로 막으면
+        // 매 응답마다 동시에 도는 emotion_update 모션 때문에 입이 차단된다.
+        // 입을 쓰는 모션(놀라기/하품)은 TTS가 없을 때만 동작하므로 충돌하지 않는다.
+        characterController.setAbstractParam("mouth_open", event.data.value ?? 0);
         return;
       }
 

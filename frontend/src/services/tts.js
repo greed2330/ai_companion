@@ -52,17 +52,31 @@ export class TTSService {
 
       // loadedmetadata 시점에 audio.duration이 확정됨.
       // onplay에서 발화하면 duration이 NaN이라 립싱크 타임라인이 3초 고정으로 깨짐.
+      // tts-start는 audio.duration이 확정된 뒤에 발화해야 한다.
+      // 이벤트 순서는 play(dur=null) → durationchange → loadedmetadata 이므로
+      // onplay에 의존하면 duration=null로 발화돼 립싱크 타임라인이 깨진다.
       let started = false;
       const dispatchStart = () => {
         if (started) return;
+        const dur = audio.duration;
+        if (!Number.isFinite(dur) || dur <= 0) return; // duration 미확정 → 대기
         started = true;
         window.dispatchEvent(new CustomEvent("tts-start", { detail: { audio, text, params } }));
       };
+      audio.addEventListener("loadedmetadata", dispatchStart);
+      audio.addEventListener("durationchange", dispatchStart);
+      audio.addEventListener("canplay", dispatchStart);
+      audio.addEventListener("playing", dispatchStart);
 
-      // loadedmetadata: 실제 환경에서 duration 확정 후 발화 (립싱크 타이밍 보장)
-      // onplay: loadedmetadata가 play 이후에 오거나 누락될 때 보장 (테스트 mock 포함)
-      audio.onloadedmetadata = dispatchStart;
-      audio.onplay = dispatchStart;
+      // duration이 끝내 확정 안 되는 환경(테스트 mock 등) 안전망:
+      // play 후에도 미발화면 audio 없이라도 발화해 립싱크 fallback이 돌게 한다.
+      audio.addEventListener("play", () => {
+        window.setTimeout(() => {
+          if (started) return;
+          started = true;
+          window.dispatchEvent(new CustomEvent("tts-start", { detail: { audio, text, params } }));
+        }, 120);
+      });
 
       audio.onended = () => {
         URL.revokeObjectURL(url);

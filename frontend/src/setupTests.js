@@ -96,11 +96,29 @@ class MockAudio {
     this.url = url;
     this.onplay = null;
     this.onended = null;
+    this.duration = 2.0; // 실제 Audio처럼 duration 제공 (립싱크 타임라인 계산용)
+    this.currentTime = 0;
+    this._listeners = {};
+  }
+
+  addEventListener(type, handler) {
+    (this._listeners[type] = this._listeners[type] || []).push(handler);
+  }
+
+  removeEventListener(type, handler) {
+    this._listeners[type] = (this._listeners[type] || []).filter((h) => h !== handler);
+  }
+
+  _emit(type) {
+    (this._listeners[type] || []).forEach((h) => h());
+    this[`on${type}`]?.();
   }
 
   play() {
-    this.onplay?.();
-    this.onended?.();
+    this._emit("loadedmetadata");
+    this._emit("play");
+    this._emit("playing");
+    this._emit("ended");
     return Promise.resolve();
   }
 
