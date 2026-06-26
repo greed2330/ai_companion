@@ -241,17 +241,21 @@ async function loadLive2dModel(container, modelUrl) {
   container.appendChild(app.view);
 
   const model = await Live2DModel.from(modelUrl);
+
+  // pixi-live2d-display의 빌트인 마우스 추적 비활성화.
+  // interactive = true(기본값)이면 pointermove 이벤트로 focusController가 자동 업데이트됨.
+  // 시선은 characterController가 직접 제어하므로 라이브러리 추적은 끈다.
+  model.interactive = false;
+
   app.stage.addChild(model);
 
   // expression 목록을 인스턴스에 캐시
   const expressionIds = getModelExpressionIds(model);
 
-  // Idle 모션 자동 시작 (모델에 'Idle' 그룹이 있을 때)
-  try {
-    model.motion("Idle", 0);
-  } catch {
-    // Idle 모션 없는 모델은 무시
-  }
+  // Idle 모션 자동 시작 금지:
+  // pixi-live2d-display의 내부 모션 시스템이 매 프레임 파라미터를 덮어써서
+  // characterController의 tween(_apply) 값이 무효화된다.
+  // 대기 애니메이션은 characterController.startIdleBreathing()이 직접 제어한다.
 
   const instance = {
     type: "live2d",

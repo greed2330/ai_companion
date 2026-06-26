@@ -1,6 +1,12 @@
 import "@testing-library/jest-dom";
 import { TextEncoder, TextDecoder } from "util";
 
+// Jest는 ESM import.meta를 지원하지 않으므로 전역 mock 설정
+// DEV 로그가 테스트에서 실행되지 않도록 false로 고정
+if (typeof globalThis.import === "undefined") {
+  globalThis.import = { meta: { env: { DEV: false } } };
+}
+
 if (!global.TextEncoder) {
   global.TextEncoder = TextEncoder;
 }

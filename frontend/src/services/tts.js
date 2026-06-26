@@ -49,19 +49,27 @@ export class TTSService {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       this.current = audio;
-      audio.onplay = () => {
-        window.dispatchEvent(
-          new CustomEvent("tts-start", {
-            detail: { audio, text, params }
-          })
-        );
+
+      // loadedmetadata 시점에 audio.duration이 확정됨.
+      // onplay에서 발화하면 duration이 NaN이라 립싱크 타임라인이 3초 고정으로 깨짐.
+      let started = false;
+      const dispatchStart = () => {
+        if (started) return;
+        started = true;
+        window.dispatchEvent(new CustomEvent("tts-start", { detail: { audio, text, params } }));
       };
+
+      // loadedmetadata: 실제 환경에서 duration 확정 후 발화 (립싱크 타이밍 보장)
+      // onplay: loadedmetadata가 play 이후에 오거나 누락될 때 보장 (테스트 mock 포함)
+      audio.onloadedmetadata = dispatchStart;
+      audio.onplay = dispatchStart;
+
       audio.onended = () => {
         URL.revokeObjectURL(url);
         window.dispatchEvent(new CustomEvent("tts-end"));
         resolve();
       };
-      audio.play();
+      audio.play().catch(() => {});
     });
   }
 

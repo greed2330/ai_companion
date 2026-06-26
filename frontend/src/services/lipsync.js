@@ -33,16 +33,31 @@ export class LipSyncService {
       return;
     }
 
-    const durationMs = (audio.duration > 0 ? audio.duration : 3) * 1000;
-    this._schedule = buildVisemeSchedule(text, durationMs);
+    const _run = () => {
+      const dur = audio.duration;
+      const durationMs = (Number.isFinite(dur) && dur > 0) ? dur * 1000 : null;
 
-    if (!this._schedule.length) {
-      // 발음 가능한 음절 없음 → amplitude fallback
-      this.start(audio);
-      return;
+      if (!durationMs) {
+        // duration을 아직 모름 → amplitude fallback으로 대체
+        this.start(audio);
+        return;
+      }
+
+      this._schedule = buildVisemeSchedule(text, durationMs);
+      if (!this._schedule.length) {
+        this.start(audio);
+        return;
+      }
+      this._runSchedule(audio);
+    };
+
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+      // loadedmetadata가 이미 발화된 상태 (tts.js가 보장함)
+      _run();
+    } else {
+      // 혹시라도 duration이 아직 없으면 loadedmetadata를 기다림
+      audio.addEventListener("loadedmetadata", _run, { once: true });
     }
-
-    this._runSchedule(audio);
   }
 
   // viseme 타임라인 추종 rAF 루프
@@ -51,9 +66,14 @@ export class LipSyncService {
     const schedule = this._schedule;
 
     const tick = () => {
-      if (!audio || audio.ended) {
-        _channel.postMessage({ type: "lipsync_value", value: 0 });
-        this.frame = null;
+      if (!audio || audio.ended || audio.paused) {
+        if (audio?.ended) {
+          _channel.postMessage({ type: "lipsync_value", value: 0 });
+          this.frame = null;
+        } else {
+          // paused 상태면 계속 폴링 (resume 대기)
+          this.frame = requestAnimationFrame(tick);
+        }
         return;
       }
 
@@ -73,6 +93,11 @@ export class LipSyncService {
           const t = Math.min(1, Math.max(0, (currentMs - curr.timeMs) / span));
           value = curr.openValue + (next.openValue - curr.openValue) * t;
         }
+      }
+
+      // 타임라인 끝을 지나면 입 닫음
+      if (frameIdx >= schedule.length - 1 && currentMs >= schedule[schedule.length - 1].timeMs) {
+        value = 0;
       }
 
       _channel.postMessage({ type: "lipsync_value", value: Math.max(0, Math.min(1, value)) });
